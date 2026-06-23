@@ -3,7 +3,7 @@
   "name": "Atlas Homepage",
   "version": "1.0.0",
   "minAppVersion": "1.5.0",
-  "description": "A karesansui (dry landscape) zen garden homepage for the Atlas vault. Pure Canvas 2D — stones, raked sand ripples, moss, and subtle ink-wash animation. Zero dependencies.",
+  "description": "A 3D constellation graph homepage for the Atlas vault. Each note is a glowing star, wikilinks are constellation lines, and Areas form colorful nebulae. Like Obsidian's Graph View — but in deep space.",
   "author": "Joyce",
   "authorUrl": "",
   "isDesktopOnly": true

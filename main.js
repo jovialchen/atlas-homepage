@@ -1,15 +1,14 @@
 /**
- * Atlas Homepage — 枯山水 · Zen Garden
- * ==========================================
+ * Atlas Homepage — 星空星座图 · Constellation Graph
+ * ==================================================
  * A custom Obsidian homepage plugin for the Atlas vault.
- * Renders a karesansui (dry landscape) zen garden using
- * pure Canvas 2D — stones, raked sand ripples, moss,
- * and subtle ink-wash animation.
+ * Renders a 3D star constellation map — each markdown note is a
+ * glowing star, wikilinks are constellation lines, and Areas
+ * form colorful nebulae. Like Obsidianʼs built-in Graph View,
+ * but in an immersive 3D space.
  *
  * Vault: Atlas (PARA + Learning/Logs/Inbox)
- * Style: Japanese zen garden, ink-wash, wabi-sabi
- *
- * Zero external dependencies — no Three.js CDN needed.
+ * Style: Deep space, nebulae, constellation lines, glowing stars
  */
 
 "use strict";
@@ -19,7 +18,35 @@ var Plugin = obsidian.Plugin;
 var ItemView = obsidian.ItemView;
 
 // ═══════════════════════════════════════════════════════════
-// AREA DEFINITIONS
+// THREE.JS CDN LOADER
+// ═══════════════════════════════════════════════════════════
+
+const THREE_CDN =
+  "https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.min.js";
+
+let THREELoaded = false;
+
+async function ensureThreeJS() {
+  if (THREELoaded) return window.THREE;
+  if (window.THREE) {
+    THREELoaded = true;
+    return window.THREE;
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = THREE_CDN;
+    script.onload = () => {
+      THREELoaded = true;
+      resolve(window.THREE);
+    };
+    script.onerror = () =>
+      reject(new Error("Failed to load Three.js from CDN"));
+    document.head.appendChild(script);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// AREA DEFINITIONS — Cluster centers in 3D space
 // ═══════════════════════════════════════════════════════════
 
 const AREAS = [
@@ -29,11 +56,10 @@ const AREAS = [
     ename: "Fun",
     icon: "🎨",
     path: "Areas/Fun",
-    color: "#c47a6b",
-    mossColor: "#9bb87f",
-    subfolders: ["Eureka", "Experience", "Movies&TV Shows", "Serendipities"],
-    // Position in design space (1000×700)
-    cx: 500, cy: 185, size: 48,
+    color: "#ff8c69",
+    nebulaColor: 0xff7043,
+    cx: 0, cy: 0.5, cz: -4.5, // 12 o'clock
+    radius: 1.8,
   },
   {
     id: "Health",
@@ -41,10 +67,10 @@ const AREAS = [
     ename: "Health",
     icon: "💚",
     path: "Areas/Health",
-    color: "#8a9b7a",
-    mossColor: "#7da864",
-    subfolders: ["Books", "Eureka", "Serendipities"],
-    cx: 690, cy: 295, size: 44,
+    color: "#69db7c",
+    nebulaColor: 0x51cf66,
+    cx: 4.3, cy: 0.3, cz: -1.4, // 2 o'clock
+    radius: 1.6,
   },
   {
     id: "Work",
@@ -52,10 +78,10 @@ const AREAS = [
     ename: "Work",
     icon: "💼",
     path: "Areas/Work",
-    color: "#8b82a0",
-    mossColor: "#8aaa76",
-    subfolders: ["Language", "SideHustle", "SoftSkill", "Technical"],
-    cx: 310, cy: 295, size: 50,
+    color: "#b197fc",
+    nebulaColor: 0x9775fa,
+    cx: -4.3, cy: -0.2, cz: -1.4, // 10 o'clock
+    radius: 1.8,
   },
   {
     id: "Love",
@@ -63,10 +89,10 @@ const AREAS = [
     ename: "Love & Family",
     icon: "💕",
     path: "Areas/Love",
-    color: "#b88a94",
-    mossColor: "#94b87a",
-    subfolders: ["Experience", "Workshops"],
-    cx: 340, cy: 490, size: 42,
+    color: "#f783ac",
+    nebulaColor: 0xf06595,
+    cx: -2.7, cy: 0.1, cz: 3.6, // 8 o'clock
+    radius: 1.4,
   },
   {
     id: "People",
@@ -74,10 +100,10 @@ const AREAS = [
     ename: "People",
     icon: "👥",
     path: "Areas/People",
-    color: "#8a9aaa",
-    mossColor: "#82a878",
-    subfolders: [],
-    cx: 660, cy: 490, size: 40,
+    color: "#74c0fc",
+    nebulaColor: 0x4dabf7,
+    cx: 2.7, cy: 0.2, cz: 3.6, // 4 o'clock
+    radius: 1.3,
   },
 ];
 
@@ -87,42 +113,44 @@ const EXTRA_NODES = [
     name: "项目",
     icon: "📋",
     path: "Projects",
-    color: "#b8956e",
-    cx: 780, cy: 160, size: 28,
+    color: "#ffa94d",
+    nebulaColor: 0xff922b,
+    cx: 7.0, cy: 0.8, cz: 1.5,
+    radius: 1.2,
   },
   {
     id: "Learning",
     name: "学习",
     icon: "📚",
     path: "Learning",
-    color: "#7a9b8c",
-    cx: 845, cy: 360, size: 26,
+    color: "#38d9a9",
+    nebulaColor: 0x20c997,
+    cx: 3.5, cy: 1.0, cz: 6.2,
+    radius: 1.1,
   },
   {
     id: "Logs",
     name: "日志",
     icon: "📝",
     path: "Logs",
-    color: "#8b8b8b",
-    cx: 740, cy: 560, size: 24,
+    color: "#adb5bd",
+    nebulaColor: 0x868e96,
+    cx: -3.5, cy: 0.6, cz: 6.2,
+    radius: 1.0,
   },
   {
     id: "Inbox",
     name: "收件箱",
     icon: "📥",
     path: "Inbox",
-    color: "#a08aaa",
-    cx: 215, cy: 380, size: 26,
+    color: "#da77f2",
+    nebulaColor: 0xbe4bdb,
+    cx: -7.0, cy: 0.4, cz: 1.5,
+    radius: 1.0,
   },
 ];
 
-// Design-space dimensions (scaled to fit actual canvas)
-const DESIGN_W = 1000;
-const DESIGN_H = 700;
-
-// ═══════════════════════════════════════════════════════════
-// SEEDED RANDOM (for deterministic stone shapes)
-// ═══════════════════════════════════════════════════════════
+// ── Helpers ────────────────────────────────────────────────
 
 function mulberry32(a) {
   return function () {
@@ -134,678 +162,835 @@ function mulberry32(a) {
   };
 }
 
+/** Fibonacci sphere: evenly distribute N points on a sphere surface */
+function fibSphere(i, n, radius, jitter) {
+  const phi = Math.acos(1 - 2 * (i + 0.5) / n);
+  const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+  const r = radius * (0.35 + 0.65 * ((jitter || Math.random)()));
+  return {
+    x: r * Math.sin(phi) * Math.cos(theta),
+    y: r * Math.sin(phi) * Math.sin(theta) + (jitter ? 0 : 0),
+    z: r * Math.cos(phi),
+  };
+}
+
 // ═══════════════════════════════════════════════════════════
-// ZEN GARDEN CANVAS SCENE
+// ORBIT CONTROLS (smooth space-navigation feel)
 // ═══════════════════════════════════════════════════════════
 
-class ZenGardenScene {
-  constructor(container, app) {
+class SpaceOrbitControls {
+  constructor(camera, domElement) {
+    this.camera = camera;
+    this.domElement = domElement;
+    this.target = { x: 0, y: 0.2, z: 0 };
+    this.spherical = { radius: 14, phi: Math.PI / 3, theta: -Math.PI / 2 };
+    this.autoRotate = true;
+    this.autoRotateSpeed = 0.12;
+    this.enableDamping = true;
+    this.dampingFactor = 0.08;
+    this.minDistance = 5;
+    this.maxDistance = 30;
+    this.maxPhi = Math.PI / 2 - 0.05;
+    this.minPhi = 0.15;
+
+    this._isDragging = false;
+    this._prevMouse = { x: 0, y: 0 };
+    this._velocity = { theta: 0, phi: 0 };
+
+    this._onMouseDown = this._onMouseDown.bind(this);
+    this._onMouseMove = this._onMouseMove.bind(this);
+    this._onMouseUp = this._onMouseUp.bind(this);
+    this._onWheel = this._onWheel.bind(this);
+    this._onTouchStart = this._onTouchStart.bind(this);
+    this._onTouchMove = this._onTouchMove.bind(this);
+    this._onTouchEnd = this._onTouchEnd.bind(this);
+
+    domElement.addEventListener("mousedown", this._onMouseDown);
+    domElement.addEventListener("mousemove", this._onMouseMove);
+    domElement.addEventListener("mouseup", this._onMouseUp);
+    domElement.addEventListener("wheel", this._onWheel, { passive: true });
+    domElement.addEventListener("touchstart", this._onTouchStart, { passive: false });
+    domElement.addEventListener("touchmove", this._onTouchMove, { passive: false });
+    domElement.addEventListener("touchend", this._onTouchEnd);
+  }
+
+  _onMouseDown(e) {
+    this._isDragging = true;
+    this._prevMouse.x = e.clientX;
+    this._prevMouse.y = e.clientY;
+    this._velocity.theta = 0;
+    this._velocity.phi = 0;
+  }
+  _onMouseMove(e) {
+    if (!this._isDragging) return;
+    const dx = e.clientX - this._prevMouse.x;
+    const dy = e.clientY - this._prevMouse.y;
+    this.spherical.theta -= dx * 0.004;
+    this.spherical.phi -= dy * 0.004;
+    this.spherical.phi = Math.max(this.minPhi, Math.min(this.maxPhi, this.spherical.phi));
+    this._velocity.theta = -dx * 0.004;
+    this._velocity.phi = -dy * 0.004;
+    this._prevMouse.x = e.clientX;
+    this._prevMouse.y = e.clientY;
+    this.autoRotate = false;
+    setTimeout(() => { this.autoRotate = true; }, 3000);
+  }
+  _onMouseUp() { this._isDragging = false; }
+  _onWheel(e) {
+    this.spherical.radius += e.deltaY * 0.01;
+    this.spherical.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.spherical.radius));
+  }
+  _onTouchStart(e) {
+    if (e.touches.length === 1) {
+      e.preventDefault();
+      this._isDragging = true;
+      this._prevMouse.x = e.touches[0].clientX;
+      this._prevMouse.y = e.touches[0].clientY;
+    }
+  }
+  _onTouchMove(e) {
+    if (!this._isDragging || e.touches.length !== 1) return;
+    e.preventDefault();
+    const dx = e.touches[0].clientX - this._prevMouse.x;
+    const dy = e.touches[0].clientY - this._prevMouse.y;
+    this.spherical.theta -= dx * 0.004;
+    this.spherical.phi -= dy * 0.004;
+    this.spherical.phi = Math.max(this.minPhi, Math.min(this.maxPhi, this.spherical.phi));
+    this._prevMouse.x = e.touches[0].clientX;
+    this._prevMouse.y = e.touches[0].clientY;
+  }
+  _onTouchEnd() { this._isDragging = false; }
+
+  update(deltaTime) {
+    if (this.autoRotate && !this._isDragging) {
+      this.spherical.theta += this.autoRotateSpeed * deltaTime;
+    } else if (!this._isDragging) {
+      this.spherical.theta += this._velocity.theta;
+      this.spherical.phi += this._velocity.phi;
+      this._velocity.theta *= 1 - this.dampingFactor;
+      this._velocity.phi *= 1 - this.dampingFactor;
+      this.spherical.phi = Math.max(this.minPhi, Math.min(this.maxPhi, this.spherical.phi));
+    }
+    this.camera.position.x = this.target.x +
+      this.spherical.radius * Math.sin(this.spherical.phi) * Math.cos(this.spherical.theta);
+    this.camera.position.y = this.target.y +
+      this.spherical.radius * Math.cos(this.spherical.phi);
+    this.camera.position.z = this.target.z +
+      this.spherical.radius * Math.sin(this.spherical.phi) * Math.sin(this.spherical.theta);
+    this.camera.lookAt(this.target.x, this.target.y, this.target.z);
+  }
+
+  dispose() {
+    this.domElement.removeEventListener("mousedown", this._onMouseDown);
+    this.domElement.removeEventListener("mousemove", this._onMouseMove);
+    this.domElement.removeEventListener("mouseup", this._onMouseUp);
+    this.domElement.removeEventListener("wheel", this._onWheel);
+    this.domElement.removeEventListener("touchstart", this._onTouchStart);
+    this.domElement.removeEventListener("touchmove", this._onTouchMove);
+    this.domElement.removeEventListener("touchend", this._onTouchEnd);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CONSTELLATION SCENE
+// ═══════════════════════════════════════════════════════════
+
+class ConstellationScene {
+  constructor(container, THREE, app, onReady) {
+    this.THREE = THREE;
     this.app = app;
     this.container = container;
+    this.onReady = onReady;
     this.animationId = null;
-    this.hoveredStone = null;
-    this.scale = 1;
-    this.offsetX = 0;
-    this.offsetY = 0;
+    this.clock = new THREE.Clock();
 
-    // Pre-generate stone shape points (deterministic)
-    this._stoneShapes = {};
-    this._buildAllStoneShapes();
+    this._graphNodes = [];   // { id, name, path, area, links, linkCount, x, y, z, size }
+    this._graphEdges = [];   // { source: idx, target: idx }
+    this._hoveredNodeIdx = -1;
+    this._tooltipEl = null;
 
-    // Ripple animation state
-    this._ripplePhase = 0;
-    this._breathingRipples = []; // expanding rings
-
-    this._init();
+    this._initScene();
+    this._prepareData().then(() => {
+      this._buildConstellation();
+      this._createTooltip();
+      this._setupInteraction();
+      this._animate();
+      if (this.onReady) this.onReady();
+    });
   }
 
-  // ── Build irregular stone outlines ───────────────────────
+  // ── Three.js Setup ───────────────────────────────────────
 
-  _buildStoneShape(seed, size, irregularity) {
-    const rand = mulberry32(seed);
-    const points = [];
-    const vertexCount = 14 + Math.floor(rand() * 10);
-    for (let i = 0; i < vertexCount; i++) {
-      const angle = (i / vertexCount) * Math.PI * 2;
-      const r = size * (0.72 + rand() * 0.56 * irregularity);
-      // Flatten slightly on one axis for natural stone look
-      const squash = 0.75 + 0.25 * Math.abs(Math.cos(angle));
-      points.push({
-        x: Math.cos(angle) * r * squash,
-        y: Math.sin(angle) * r,
-      });
-    }
-    return points;
-  }
+  _initScene() {
+    const THREE = this.THREE;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
 
-  _buildAllStoneShapes() {
-    let seedBase = 1;
-    for (const area of AREAS) {
-      this._stoneShapes[area.id] = this._buildStoneShape(
-        seedBase++, area.size, 0.7
-      );
-      // Subfolder moss patches
-      this._stoneShapes[area.id + "_moss"] = area.subfolders.map((_, i) =>
-        this._buildStoneShape(seedBase++ * 100 + i, area.size * 0.18, 0.9)
-      );
-    }
-    for (const node of EXTRA_NODES) {
-      this._stoneShapes[node.id] = this._buildStoneShape(
-        seedBase++, node.size, 0.55
-      );
-    }
-  }
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(w, h);
+    this.renderer.setClearColor(0x080c14);
+    this.container.appendChild(this.renderer.domElement);
 
-  // ── Init ─────────────────────────────────────────────────
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x080c14, 0.00015);
 
-  _init() {
-    // Create canvas
-    this.canvas = document.createElement("canvas");
-    this.canvas.className = "zen-garden-canvas";
-    this.canvas.style.cssText =
-      "display:block;width:100%;height:100%;cursor:default;";
-    this.container.appendChild(this.canvas);
-    this.ctx = this.canvas.getContext("2d");
+    this.camera = new THREE.PerspectiveCamera(55, w / h, 0.3, 50);
+    this.camera.position.set(0, 8, 14);
 
-    // Interaction
-    this._setupInteraction();
+    this.controls = new SpaceOrbitControls(this.camera, this.renderer.domElement);
 
-    // Resize
-    this._onResize = () => this._resize();
+    // Lighting (minimal — most glow comes from additive sprites)
+    this.scene.add(new THREE.AmbientLight(0x222244, 0.6));
+    const pointLight = new THREE.PointLight(0xffffff, 0.8, 25);
+    pointLight.position.set(0, 2, 0);
+    this.scene.add(pointLight);
+
+    this._onResize = () => {
+      const rw = this.container.clientWidth;
+      const rh = this.container.clientHeight;
+      this.camera.aspect = rw / rh;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(rw, rh);
+    };
     window.addEventListener("resize", this._onResize);
-    this._resize();
-
-    // Spawn initial breathing ripples
-    for (const area of AREAS) {
-      this._breathingRipples.push({
-        cx: area.cx,
-        cy: area.cy,
-        radius: 0,
-        maxRadius: area.size * 2.8,
-        speed: 0.15 + Math.random() * 0.2,
-        opacity: 0.35,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-
-    // Start animation
-    this._animate();
   }
 
-  _resize() {
-    const rect = this.container.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio, 2);
-    const w = rect.width;
-    const h = rect.height;
+  // ── Graph Data Preparation ───────────────────────────────
 
-    this.canvas.width = w * dpr;
-    this.canvas.height = h * dpr;
+  async _prepareData() {
+    const files = this.app.vault.getMarkdownFiles();
+    const fileMap = new Map(); // normalized path -> node index
+    const areaLookup = new Map();
 
-    // Calculate scale to fit design space
-    const scaleX = w / DESIGN_W;
-    const scaleY = h / DESIGN_H;
-    this.scale = Math.min(scaleX, scaleY);
-    this.offsetX = (w - DESIGN_W * this.scale) / 2;
-    this.offsetY = (h - DESIGN_H * this.scale) / 2;
+    // Build area lookup: "Areas/Fun" -> AREAS[0] etc.
+    for (const a of AREAS) areaLookup.set(a.path, a);
+    for (const e of EXTRA_NODES) areaLookup.set(e.path, e);
 
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
+    // First pass: create nodes
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const links = (cache && cache.links) ? cache.links : [];
+      const inlinks = (cache && cache.backlinks) ? Object.keys(cache.backlinks) : [];
 
-  // ── Drawing ──────────────────────────────────────────────
-
-  _draw(time) {
-    const ctx = this.ctx;
-    const w = this.canvas.width / (Math.min(window.devicePixelRatio, 2));
-    const h = this.canvas.height / (Math.min(window.devicePixelRatio, 2));
-
-    // Clear
-    ctx.clearRect(0, 0, w, h);
-
-    ctx.save();
-    ctx.translate(this.offsetX, this.offsetY);
-    ctx.scale(this.scale, this.scale);
-
-    // Clip to design area
-    ctx.beginPath();
-    ctx.rect(0, 0, DESIGN_W, DESIGN_H);
-    ctx.clip();
-
-    // 1. Sand background
-    this._drawSand(ctx, time);
-
-    // 2. Raked sand ripples
-    this._drawRipples(ctx, time);
-
-    // 3. Connecting sand paths (subtle lines between stones)
-    this._drawGardenPaths(ctx);
-
-    // 4. Extra node stones (drawn behind main stones)
-    for (const node of EXTRA_NODES) {
-      this._drawStone(ctx, node, time);
-      this._drawLabel(ctx, node, time);
-    }
-
-    // 5. Main area stones
-    for (const area of AREAS) {
-      this._drawStone(ctx, area, time);
-      this._drawMoss(ctx, area, time);
-      this._drawLabel(ctx, area, time);
-    }
-
-    // 6. Garden enclosure frame
-    this._drawFrame(ctx, time);
-
-    // 7. Floating sand particles
-    this._drawParticles(ctx, time);
-
-    ctx.restore();
-  }
-
-  // ── Sand Background ──────────────────────────────────────
-
-  _drawSand(ctx, _time) {
-    // Base sand
-    const sandGrad = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
-    sandGrad.addColorStop(0, "#f7f3ec");
-    sandGrad.addColorStop(0.5, "#f5f0e8");
-    sandGrad.addColorStop(1, "#f0eae0");
-    ctx.fillStyle = sandGrad;
-    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
-
-    // Subtle grain texture (sparse dots)
-    ctx.fillStyle = "rgba(180,170,155,0.12)";
-    const grainSeed = 42;
-    const grainRand = mulberry32(grainSeed);
-    for (let i = 0; i < 400; i++) {
-      const gx = grainRand() * DESIGN_W;
-      const gy = grainRand() * DESIGN_H;
-      ctx.beginPath();
-      ctx.arc(gx, gy, 0.6 + grainRand() * 1.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Subtle vignette edges
-    const vignette = ctx.createRadialGradient(
-      DESIGN_W / 2, DESIGN_H / 2, DESIGN_W * 0.35,
-      DESIGN_W / 2, DESIGN_H / 2, DESIGN_W * 0.75
-    );
-    vignette.addColorStop(0, "rgba(0,0,0,0)");
-    vignette.addColorStop(1, "rgba(120,100,70,0.08)");
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
-  }
-
-  // ── Raked Sand Ripples ──────────────────────────────────
-
-  _drawRipples(ctx, time) {
-    // Concentric ripples around each area stone
-    const allStones = [...AREAS, ...EXTRA_NODES];
-
-    for (const stone of allStones) {
-      const cx = stone.cx;
-      const cy = stone.cy;
-      const maxR = stone.size * 3.5;
-
-      // Draw multiple concentric rings with decreasing opacity
-      const ringCount = 12;
-      for (let i = 1; i <= ringCount; i++) {
-        const baseR = stone.size * 0.8 + (i / ringCount) * (maxR - stone.size * 0.8);
-        // Subtle breathing animation
-        const breathe = Math.sin(time * 0.0004 + i * 0.5 + stone.cx * 0.01) * 1.5;
-        const r = baseR + breathe;
-        const alpha = 0.22 * (1 - i / ringCount) * (1 - i / ringCount);
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(180,168,148,${alpha.toFixed(3)})`;
-        ctx.lineWidth = 0.7 + (i % 3 === 0 ? 0.4 : 0);
-        ctx.stroke();
+      // Determine which Area this file belongs to
+      let areaDef = null;
+      for (const a of [...AREAS, ...EXTRA_NODES]) {
+        if (file.path.startsWith(a.path + "/")) {
+          areaDef = a;
+          break;
+        }
       }
 
-      // Animated expanding ripple (breathing out)
-      for (const ripple of this._breathingRipples) {
-        if (Math.abs(ripple.cx - cx) < 2 && Math.abs(ripple.cy - cy) < 2) {
-          ripple.radius += ripple.speed * 0.06;
-          if (ripple.radius > ripple.maxRadius) {
-            ripple.radius = 0;
+      const node = {
+        id: file.path,
+        name: file.basename,
+        path: file.path,
+        area: areaDef ? areaDef.id : null,
+        areaColor: areaDef ? areaDef.color : "#888899",
+        areaNebula: areaDef ? areaDef.nebulaColor : 0x888899,
+        clusterCx: areaDef ? areaDef.cx : 0,
+        clusterCy: areaDef ? areaDef.cy : -3,
+        clusterCz: areaDef ? areaDef.cz : 0,
+        clusterR: areaDef ? areaDef.radius : 1.0,
+        links: links,
+        inlinks: inlinks,
+        linkCount: links.length + inlinks.length,
+        x: 0, y: 0, z: 0,
+        size: 0.06,
+        seed: this._hashCode(file.path),
+      };
+
+      this._graphNodes.push(node);
+      fileMap.set(file.path, this._graphNodes.length - 1);
+    }
+
+    // Second pass: resolve links to edges
+    const edgeSet = new Set();
+    for (let i = 0; i < this._graphNodes.length; i++) {
+      const node = this._graphNodes[i];
+      for (const link of node.links) {
+        const resolved = this.app.metadataCache.getFirstLinkpathDest(
+          link.link, node.path
+        );
+        if (resolved) {
+          const targetPath = resolved.path;
+          const j = fileMap.get(targetPath);
+          if (j !== undefined && j !== i) {
+            const key = Math.min(i, j) + "_" + Math.max(i, j);
+            if (!edgeSet.has(key)) {
+              edgeSet.add(key);
+              this._graphEdges.push({ source: i, target: j });
+            }
           }
-          const progress = ripple.radius / ripple.maxRadius;
-          const alpha = ripple.opacity * (1 - progress) * (1 - progress);
-          ctx.beginPath();
-          ctx.arc(cx, cy, ripple.radius, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(160,145,125,${alpha.toFixed(3)})`;
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
         }
       }
     }
 
-    // Garden-wide raking lines (horizontal-ish, slight wave)
-    ctx.save();
-    ctx.globalAlpha = 0.06;
-    ctx.strokeStyle = "#b0a590";
-    ctx.lineWidth = 0.5;
-    const lineSpacing = 8;
-    for (let y = lineSpacing; y < DESIGN_H; y += lineSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      for (let x = 0; x < DESIGN_W; x += 20) {
-        // Gentle wave around stones
-        const wave = Math.sin(x * 0.008 + time * 0.0001 + y * 0.02) * 2.5;
-        ctx.lineTo(x, y + wave);
-      }
-      ctx.stroke();
+    // Position nodes: fibonacci sphere within each cluster
+    const clusterCounts = {};
+    for (const node of this._graphNodes) {
+      const key = node.area || "_unclustered";
+      clusterCounts[key] = (clusterCounts[key] || 0) + 1;
     }
-    ctx.restore();
-  }
+    const clusterIndex = {};
 
-  // ── Sand Garden Paths ────────────────────────────────────
+    for (const node of this._graphNodes) {
+      const key = node.area || "_unclustered";
+      if (!clusterIndex[key]) clusterIndex[key] = 0;
+      const idx = clusterIndex[key]++;
+      const total = clusterCounts[key];
+      const rand = mulberry32(node.seed);
 
-  _drawGardenPaths(ctx) {
-    // Subtle raked paths connecting central area to each main stone
-    const centerX = DESIGN_W / 2;
-    const centerY = DESIGN_H / 2;
+      const pos = fibSphere(idx, total, node.clusterR, () => rand());
+      node.x = node.clusterCx + pos.x;
+      node.y = node.clusterCy + pos.y;
+      node.z = node.clusterCz + pos.z;
 
-    ctx.save();
-    ctx.globalAlpha = 0.07;
-    ctx.strokeStyle = "#c4b8a5";
-    ctx.lineWidth = 14;
-
-    for (const area of AREAS) {
-      ctx.beginPath();
-      ctx.moveTo(centerX, centerY);
-      // Slightly curved path
-      const midX = (centerX + area.cx) / 2 + (area.cy - centerY) * 0.15;
-      const midY = (centerY + area.cy) / 2 + (centerX - area.cx) * 0.1;
-      ctx.quadraticCurveTo(midX, midY, area.cx, area.cy);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // Center empty circle (ma / negative space)
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 28, 0, Math.PI * 2);
-    ctx.fillStyle = "#f2ece2";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(170,158,138,0.3)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-
-  // ── Stone Drawing ────────────────────────────────────────
-
-  _drawStone(ctx, stone, _time) {
-    const shapes = this._stoneShapes[stone.id];
-    if (!shapes) return;
-
-    const cx = stone.cx;
-    const cy = stone.cy;
-
-    // Stone shadow (offset slightly)
-    ctx.save();
-    ctx.translate(cx + 3, cy + 3);
-    ctx.beginPath();
-    ctx.moveTo(shapes[0].x, shapes[0].y);
-    for (let i = 1; i < shapes.length; i++) {
-      ctx.lineTo(shapes[i].x, shapes[i].y);
-    }
-    ctx.closePath();
-    ctx.fillStyle = "rgba(140,125,105,0.25)";
-    ctx.fill();
-    ctx.restore();
-
-    // Stone body with gradient
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.beginPath();
-    ctx.moveTo(shapes[0].x, shapes[0].y);
-    for (let i = 1; i < shapes.length; i++) {
-      ctx.lineTo(shapes[i].x, shapes[i].y);
-    }
-    ctx.closePath();
-
-    // Stone gradient (lit from top-left)
-    const grad = ctx.createLinearGradient(
-      -stone.size, -stone.size,
-      stone.size, stone.size
-    );
-    grad.addColorStop(0, this._lightenColor(stone.color, 20));
-    grad.addColorStop(0.5, stone.color);
-    grad.addColorStop(1, this._darkenColor(stone.color, 25));
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Stone edge (ink outline)
-    ctx.strokeStyle = "rgba(70,55,40,0.35)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // Highlight on top-left edge
-    ctx.beginPath();
-    ctx.moveTo(shapes[0].x, shapes[0].y);
-    for (let i = 1; i < Math.floor(shapes.length * 0.35); i++) {
-      ctx.lineTo(shapes[i].x, shapes[i].y);
-    }
-    ctx.strokeStyle = "rgba(255,250,240,0.3)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.restore();
-
-    // Store hit-test center and radius
-    stone._hitR = stone.size * 0.85;
-  }
-
-  // ── Moss Patches (subfolders) ────────────────────────────
-
-  _drawMoss(ctx, area, time) {
-    const mossShapes = this._stoneShapes[area.id + "_moss"];
-    if (!mossShapes || mossShapes.length === 0) return;
-
-    const subfolders = area.subfolders;
-
-    for (let i = 0; i < mossShapes.length; i++) {
-      const shape = mossShapes[i];
-      // Position moss near the stone
-      const angle = (i / mossShapes.length) * Math.PI * 2 + 0.4;
-      const dist = area.size * 0.85;
-      const mx = area.cx + Math.cos(angle) * dist;
-      const my = area.cy + Math.sin(angle) * dist;
-
-      ctx.save();
-      ctx.translate(mx, my);
-
-      // Moss body
-      ctx.beginPath();
-      ctx.moveTo(shape[0].x, shape[0].y);
-      for (let j = 1; j < shape.length; j++) {
-        ctx.lineTo(shape[j].x, shape[j].y);
-      }
-      ctx.closePath();
-
-      const mossGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, area.size * 0.2);
-      mossGrad.addColorStop(0, area.mossColor);
-      mossGrad.addColorStop(1, this._darkenColor(area.mossColor, 20));
-      ctx.fillStyle = mossGrad;
-      ctx.fill();
-
-      // Soft edge
-      ctx.strokeStyle = "rgba(60,80,40,0.2)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-
-      // Subtle moss texture dots
-      ctx.fillStyle = "rgba(100,140,80,0.25)";
-      const dotRand = mulberry32(i * 37 + area.cx);
-      for (let d = 0; d < 4; d++) {
-        const dx = (dotRand() - 0.5) * area.size * 0.2;
-        const dy = (dotRand() - 0.5) * area.size * 0.2;
-        ctx.beginPath();
-        ctx.arc(dx, dy, 1.5 + dotRand() * 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Store subfolder name for hit testing
-      if (subfolders[i]) {
-        ctx.restore();
-        ctx.save();
-        ctx.translate(mx, my);
-        // Store hit area data on a hidden property
-        this._subHitAreas = this._subHitAreas || [];
-        this._subHitAreas.push({
-          cx: mx, cy: my, r: area.size * 0.16,
-          areaId: area.id,
-          subName: subfolders[i],
-        });
-        ctx.restore();
-        ctx.save();
-      }
-
-      ctx.restore();
+      // Size by importance (link count), with min/max
+      const importance = Math.min(1, node.linkCount / 15);
+      node.size = 0.05 + importance * 0.1;
     }
   }
 
-  // ── Calligraphy Labels ───────────────────────────────────
-
-  _drawLabel(ctx, stone, _time) {
-    const cx = stone.cx;
-    const cy = stone.cy + stone.size * 0.7 + 18;
-
-    // Name
-    ctx.font = "bold 15px Georgia, 'Noto Serif SC', 'KaiTi', serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-
-    // Ink-wash shadow
-    ctx.fillStyle = "rgba(200,185,165,0.4)";
-    ctx.fillText(stone.name, cx + 0.5, cy + 0.5);
-
-    // Main text
-    ctx.fillStyle = "#4a3728";
-    ctx.fillText(stone.name, cx, cy);
-
-    // Icon above name
-    ctx.font = "18px serif";
-    ctx.fillText(stone.icon, cx, cy - 24);
-
-    // Subtle red seal / hanko dot for extra nodes
-    if (stone.size < 32) {
-      ctx.beginPath();
-      ctx.arc(cx + stone.size * 0.55, cy - 8, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(180,80,60,0.5)";
-      ctx.fill();
+  _hashCode(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
     }
-
-    // Store label position for hit testing
-    stone._labelY = cy;
+    return Math.abs(hash);
   }
 
-  // ── Garden Frame ─────────────────────────────────────────
+  // ── Build 3D Constellation ───────────────────────────────
 
-  _drawFrame(ctx, _time) {
-    const margin = 12;
-    const alpha = 0.18;
+  _buildConstellation() {
+    const THREE = this.THREE;
 
-    // Outer border (thin, like a tatami edge)
-    ctx.strokeStyle = `rgba(139,115,85,${alpha})`;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(margin, margin, DESIGN_W - margin * 2, DESIGN_H - margin * 2);
+    // 1. Deep space starfield (distant background)
+    this._createStarfield();
 
-    // Inner border
-    ctx.strokeStyle = `rgba(180,160,135,${alpha * 0.7})`;
-    ctx.lineWidth = 0.8;
-    ctx.strokeRect(margin + 8, margin + 8, DESIGN_W - (margin + 8) * 2, DESIGN_H - (margin + 8) * 2);
+    // 2. Nebula clouds around each cluster
+    this._createNebulae();
 
-    // Corner accents (simple L-shapes)
-    const cornerLen = 24;
-    const cm = margin + 4;
-    ctx.strokeStyle = `rgba(139,115,85,${(alpha * 0.6).toFixed(3)})`;
-    ctx.lineWidth = 1;
-    [
-      [cm, cm], // top-left
-      [DESIGN_W - cm, cm], // top-right
-      [cm, DESIGN_H - cm], // bottom-left
-      [DESIGN_W - cm, DESIGN_H - cm], // bottom-right
-    ].forEach(([cx, cy]) => {
-      const dx = cx < DESIGN_W / 2 ? 1 : -1;
-      const dy = cy < DESIGN_H / 2 ? 1 : -1;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + cornerLen * dy);
-      ctx.lineTo(cx, cy);
-      ctx.lineTo(cx + cornerLen * dx, cy);
-      ctx.stroke();
+    // 3. Note stars (InstancedMesh)
+    this._createNoteStars();
+
+    // 4. Constellation lines
+    this._createConstellationLines();
+
+    // 5. Area labels
+    this._createAreaLabels();
+
+    // 6. Central bright node
+    this._createCentralNode();
+  }
+
+  // ── 1. Starfield ─────────────────────────────────────────
+
+  _createStarfield() {
+    const THREE = this.THREE;
+    const count = 2000;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      // Distribute on a large sphere
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 18 + Math.random() * 14;
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      positions[i * 3 + 2] = r * Math.cos(phi);
+
+      // Slightly warm/cool variation
+      const temp = 0.7 + Math.random() * 0.3;
+      colors[i * 3] = temp;
+      colors[i * 3 + 1] = temp * (0.85 + Math.random() * 0.15);
+      colors[i * 3 + 2] = temp * (0.75 + Math.random() * 0.25);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.08,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.8,
     });
+
+    this.starfield = new THREE.Points(geo, mat);
+    this.starfield.name = "starfield";
+    this.scene.add(this.starfield);
   }
 
-  // ── Floating Sand Particles ──────────────────────────────
+  // ── 2. Nebula Clouds ─────────────────────────────────────
 
-  _drawParticles(ctx, time) {
-    if (!this._particles) {
-      this._particles = [];
-      const pRand = mulberry32(777);
-      for (let i = 0; i < 60; i++) {
-        this._particles.push({
-          x: pRand() * DESIGN_W,
-          y: pRand() * DESIGN_H,
-          r: 0.6 + pRand() * 1.4,
-          speed: 0.08 + pRand() * 0.25,
-          phase: pRand() * Math.PI * 2,
-          amp: 0.3 + pRand() * 1.2,
-        });
+  _createNebulae() {
+    const THREE = this.THREE;
+    this._nebulaClouds = [];
+
+    // Create glow sprite texture
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, "rgba(255,255,255,0.4)");
+    grad.addColorStop(0.15, "rgba(255,255,255,0.2)");
+    grad.addColorStop(0.4, "rgba(255,255,255,0.06)");
+    grad.addColorStop(0.7, "rgba(255,255,255,0.01)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    const nebulaTex = new THREE.CanvasTexture(canvas);
+
+    const allClusters = [...AREAS, ...EXTRA_NODES];
+    for (const cluster of allClusters) {
+      const count = 80 + Math.floor(Math.random() * 60);
+      const positions = new Float32Array(count * 3);
+
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = cluster.radius * (0.3 + Math.random() * 1.2);
+        positions[i * 3] = cluster.cx + r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = cluster.cy + r * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = cluster.cz + r * Math.cos(phi);
       }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+      const mat = new THREE.PointsMaterial({
+        map: nebulaTex,
+        color: cluster.nebulaColor,
+        size: 0.6,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0.35,
+      });
+
+      const cloud = new THREE.Points(geo, mat);
+      cloud.name = `nebula-${cluster.id}`;
+      cloud.userData = { clusterId: cluster.id };
+      this.scene.add(cloud);
+      this._nebulaClouds.push(cloud);
+    }
+  }
+
+  // ── 3. Note Stars ────────────────────────────────────────
+
+  _createNoteStars() {
+    const THREE = this.THREE;
+
+    // Use a sphere geometry instanced for all notes
+    const baseGeo = new THREE.SphereGeometry(1, 8, 6);
+    this._noteMesh = new THREE.InstancedMesh(
+      baseGeo,
+      new THREE.MeshStandardMaterial({
+        roughness: 0.4,
+        metalness: 0.1,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.5,
+      }),
+      this._graphNodes.length
+    );
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    for (let i = 0; i < this._graphNodes.length; i++) {
+      const node = this._graphNodes[i];
+      dummy.position.set(node.x, node.y, node.z);
+      dummy.scale.setScalar(node.size);
+      dummy.updateMatrix();
+      this._noteMesh.setMatrixAt(i, dummy.matrix);
+
+      // Store color per instance
+      color.set(node.areaColor);
+      this._noteMesh.setColorAt(i, color);
     }
 
-    ctx.fillStyle = "rgba(190,175,150,0.25)";
-    for (const p of this._particles) {
-      const py = p.y + Math.sin(time * 0.0005 + p.phase) * p.amp;
-      const px = p.x + Math.cos(time * 0.0004 + p.phase) * p.amp * 0.6;
-      ctx.beginPath();
-      ctx.arc(px, py, p.r, 0, Math.PI * 2);
-      ctx.fill();
+    this._noteMesh.instanceMatrix.needsUpdate = true;
+    this._noteMesh.instanceColor.needsUpdate = true;
+    this._noteMesh.name = "note-stars";
+    this._noteMesh.castShadow = false;
+    this.scene.add(this._noteMesh);
+  }
+
+  // ── 4. Constellation Lines ───────────────────────────────
+
+  _createConstellationLines() {
+    const THREE = this.THREE;
+
+    // Limit lines to avoid performance issues (cap at 800)
+    const maxEdges = Math.min(this._graphEdges.length, 800);
+    const sorted = [...this._graphEdges].sort(
+      (a, b) => this._edgeWeight(b) - this._edgeWeight(a)
+    );
+    const topEdges = sorted.slice(0, maxEdges);
+
+    const positions = [];
+    const colors = [];
+
+    for (const edge of topEdges) {
+      const src = this._graphNodes[edge.source];
+      const tgt = this._graphNodes[edge.target];
+      if (!src || !tgt) continue;
+
+      positions.push(src.x, src.y, src.z);
+      positions.push(tgt.x, tgt.y, tgt.z);
+
+      // Color line by source Area color (subtle)
+      const sc = new THREE.Color(src.areaColor);
+      const tc = new THREE.Color(tgt.areaColor);
+      colors.push(sc.r * 0.5, sc.g * 0.5, sc.b * 0.5);
+      colors.push(tc.r * 0.5, tc.g * 0.5, tc.b * 0.5);
     }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3)
+    );
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    this._constellationLines = new THREE.LineSegments(geo, mat);
+    this._constellationLines.name = "constellation-lines";
+    this.scene.add(this._constellationLines);
+  }
+
+  _edgeWeight(edge) {
+    const s = this._graphNodes[edge.source];
+    const t = this._graphNodes[edge.target];
+    return (s ? s.linkCount : 0) + (t ? t.linkCount : 0);
+  }
+
+  // ── 5. Area Labels ───────────────────────────────────────
+
+  _createAreaLabels() {
+    const THREE = this.THREE;
+    const allClusters = [...AREAS, ...EXTRA_NODES];
+
+    for (const cluster of allClusters) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 128;
+      const ctx = canvas.getContext("2d");
+
+      // Icon
+      ctx.font = "32px serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(cluster.icon, 128, 38);
+
+      // Name
+      ctx.font = "bold 20px 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = "#ddeeff";
+      ctx.fillText(cluster.name, 128, 68);
+
+      // Subtle glow bar under name
+      const barW = ctx.measureText(cluster.name).width;
+      ctx.fillStyle = cluster.color;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(128 - barW / 2, 76, barW, 3);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearFilter;
+
+      const spriteMat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        depthTest: false,
+        blending: THREE.NormalBlending,
+      });
+      const sprite = new THREE.Sprite(spriteMat);
+      sprite.position.set(
+        cluster.cx,
+        cluster.cy + cluster.radius + 0.6,
+        cluster.cz
+      );
+      sprite.scale.set(2.5, 1.25, 1);
+      sprite.name = `label-${cluster.id}`;
+      this.scene.add(sprite);
+    }
+  }
+
+  // ── 6. Central Bright Node ───────────────────────────────
+
+  _createCentralNode() {
+    const THREE = this.THREE;
+
+    // Core sphere
+    const coreGeo = new THREE.SphereGeometry(0.15, 16, 16);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffeedd });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.set(0, 0.2, 0);
+    core.name = "central-core";
+    this.scene.add(core);
+
+    // Glow halo (additive sprite)
+    const haloCanvas = document.createElement("canvas");
+    haloCanvas.width = 128;
+    haloCanvas.height = 128;
+    const hctx = haloCanvas.getContext("2d");
+    const hgrad = hctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    hgrad.addColorStop(0, "rgba(255,250,240,0.7)");
+    hgrad.addColorStop(0.15, "rgba(255,220,180,0.35)");
+    hgrad.addColorStop(0.4, "rgba(255,180,100,0.08)");
+    hgrad.addColorStop(1, "rgba(0,0,0,0)");
+    hctx.fillStyle = hgrad;
+    hctx.fillRect(0, 0, 128, 128);
+
+    const haloMat = new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(haloCanvas),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    });
+    this._centralHalo = new THREE.Sprite(haloMat);
+    this._centralHalo.position.set(0, 0.2, 0);
+    this._centralHalo.scale.set(3, 3, 1);
+    this._centralHalo.name = "central-halo";
+    this.scene.add(this._centralHalo);
+
+    // Orbiting ring particles
+    const ringCount = 40;
+    this._ringData = [];
+    const ringPositions = new Float32Array(ringCount * 3);
+    for (let i = 0; i < ringCount; i++) {
+      const angle = (i / ringCount) * Math.PI * 2;
+      const r = 0.55 + Math.random() * 0.3;
+      const y = (Math.random() - 0.5) * 0.3;
+      ringPositions[i * 3] = Math.cos(angle) * r;
+      ringPositions[i * 3 + 1] = y;
+      ringPositions[i * 3 + 2] = Math.sin(angle) * r;
+      this._ringData.push({
+        radius: r,
+        height: y,
+        angle: angle,
+        speed: 0.4 + Math.random() * 0.8,
+      });
+    }
+
+    const ringGeo = new THREE.BufferGeometry();
+    ringGeo.setAttribute("position", new THREE.BufferAttribute(ringPositions, 3));
+    const dotCanvas = document.createElement("canvas");
+    dotCanvas.width = 16;
+    dotCanvas.height = 16;
+    const dctx = dotCanvas.getContext("2d");
+    const dgrad = dctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    dgrad.addColorStop(0, "rgba(255,240,200,0.8)");
+    dgrad.addColorStop(0.5, "rgba(255,200,100,0.2)");
+    dgrad.addColorStop(1, "rgba(0,0,0,0)");
+    dctx.fillStyle = dgrad;
+    dctx.fillRect(0, 0, 16, 16);
+
+    const ringMat = new THREE.PointsMaterial({
+      map: new THREE.CanvasTexture(dotCanvas),
+      color: 0xffeedd,
+      size: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    });
+    this._ringParticles = new THREE.Points(ringGeo, ringMat);
+    this._ringParticles.position.set(0, 0.2, 0);
+    this._ringParticles.name = "central-ring";
+    this.scene.add(this._ringParticles);
+  }
+
+  // ── Tooltip ──────────────────────────────────────────────
+
+  _createTooltip() {
+    this._tooltipEl = document.createElement("div");
+    this._tooltipEl.className = "atlas-homepage-tooltip constellation-tooltip";
+    this._tooltipEl.style.cssText =
+      "position:absolute;display:none;pointer-events:none;z-index:100;" +
+      "padding:6px 14px;background:rgba(10,14,24,0.92);color:#ddeeff;" +
+      "border:1px solid rgba(150,180,220,0.3);border-radius:6px;" +
+      "font-size:13px;white-space:nowrap;letter-spacing:0.3px;";
+    this.container.appendChild(this._tooltipEl);
+  }
+
+  _updateTooltip(event, idx) {
+    if (idx < 0 || idx >= this._graphNodes.length) {
+      this._tooltipEl.style.display = "none";
+      return;
+    }
+    const node = this._graphNodes[idx];
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this._tooltipEl.style.display = "block";
+    this._tooltipEl.style.left = (event.clientX - rect.left + 18) + "px";
+    this._tooltipEl.style.top = (event.clientY - rect.top - 12) + "px";
+    this._tooltipEl.textContent =
+      `${node.name}  ·  ${node.linkCount} links  ·  ${node.area || "unclustered"}`;
   }
 
   // ── Interaction ──────────────────────────────────────────
 
   _setupInteraction() {
-    this.canvas.addEventListener("mousemove", (e) => {
-      const pos = this._eventToDesign(e);
-      const hit = this._hitTest(pos.x, pos.y);
-      if (hit !== this.hoveredStone) {
-        this.hoveredStone = hit;
-        this.canvas.style.cursor = hit ? "pointer" : "default";
-        // Redraw for hover effect
-        this._draw(this._lastTime || Date.now());
+    this.raycaster = new this.THREE.Raycaster();
+    this.mouse = new this.THREE.Vector2();
+
+    const canvas = this.renderer.domElement;
+
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.raycaster.intersectObject(this._noteMesh);
+      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
+        const idx = intersects[0].instanceId;
+        this._hoveredNodeIdx = idx;
+        this._updateTooltip(e, idx);
+        canvas.style.cursor = "pointer";
+      } else {
+        this._hoveredNodeIdx = -1;
+        this._tooltipEl.style.display = "none";
+        canvas.style.cursor = this.controls._isDragging ? "grabbing" : "grab";
       }
     });
 
-    this.canvas.addEventListener("click", (e) => {
-      const pos = this._eventToDesign(e);
-      const hit = this._hitTest(pos.x, pos.y);
-      if (hit) {
-        this._navigateTo(hit);
+    canvas.addEventListener("click", (_e) => {
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.raycaster.intersectObject(this._noteMesh);
+      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
+        const idx = intersects[0].instanceId;
+        const node = this._graphNodes[idx];
+        if (node) this._openNote(node.path);
       }
     });
 
-    // Touch support
-    this.canvas.addEventListener("touchend", (e) => {
+    canvas.addEventListener("touchstart", () => {
+      canvas.style.cursor = "grabbing";
+    });
+
+    canvas.addEventListener("touchend", (e) => {
+      canvas.style.cursor = "grab";
       if (e.changedTouches.length === 1) {
         const touch = e.changedTouches[0];
-        const pos = this._eventToDesign(touch);
-        const hit = this._hitTest(pos.x, pos.y);
-        if (hit) {
-          this._navigateTo(hit);
+        const rect = canvas.getBoundingClientRect();
+        const mx = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+        const my = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+        const tv = new this.THREE.Vector2(mx, my);
+        this.raycaster.setFromCamera(tv, this.camera);
+        const intersects = this.raycaster.intersectObject(this._noteMesh);
+        if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
+          const idx = intersects[0].instanceId;
+          const node = this._graphNodes[idx];
+          if (node) this._openNote(node.path);
         }
       }
     });
   }
 
-  _eventToDesign(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left - this.offsetX) / this.scale,
-      y: (e.clientY - rect.top - this.offsetY) / this.scale,
-    };
-  }
-
-  _hitTest(x, y) {
-    // Check main area stones
-    for (const area of AREAS) {
-      const dx = x - area.cx;
-      const dy = y - area.cy;
-      if (Math.sqrt(dx * dx + dy * dy) < area.size * 0.9) {
-        return { type: "area", path: area.path };
-      }
-    }
-
-    // Check extra nodes
-    for (const node of EXTRA_NODES) {
-      const dx = x - node.cx;
-      const dy = y - node.cy;
-      if (Math.sqrt(dx * dx + dy * dy) < node.size * 0.9) {
-        return { type: "area", path: node.path };
-      }
-    }
-
-    // Check subfolder moss patches
-    if (this._subHitAreas) {
-      for (const sub of this._subHitAreas) {
-        const dx = x - sub.cx;
-        const dy = y - sub.cy;
-        if (Math.sqrt(dx * dx + dy * dy) < sub.r) {
-          const area = AREAS.find((a) => a.id === sub.areaId);
-          if (area) {
-            return {
-              type: "sub",
-              path: area.path + "/" + sub.subName,
-            };
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  _navigateTo(hit) {
-    if (!hit.path || !this.app) return;
-
-    const abstractFile = this.app.vault.getAbstractFileByPath(hit.path);
-    if (!abstractFile) return;
-
-    const fileExplorer =
-      this.app.internalPlugins?.getPluginById("file-explorer");
-    if (fileExplorer?.enabled) {
-      const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-      if (leaves.length > 0) {
-        // @ts-ignore
-        const explorerView = leaves[0].view;
-        if (explorerView?.revealInFolder) {
-          explorerView.revealInFolder(abstractFile);
-        }
-      }
+  _openNote(path) {
+    if (!this.app) return;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file) {
+      this.app.workspace.getLeaf(false).openFile(file);
     }
   }
 
-  // ── Animation Loop ───────────────────────────────────────
+  // ── Animation ────────────────────────────────────────────
 
   _animate() {
     this.animationId = requestAnimationFrame(() => this._animate());
-    const time = Date.now();
-    this._lastTime = time;
-    this._draw(time);
+    const delta = this.clock.getDelta();
+    const time = Date.now() * 0.001;
+
+    this.controls.update(Math.min(delta, 0.1));
+
+    // Pulsing central halo
+    if (this._centralHalo) {
+      const pulse = 1 + Math.sin(time * 1.5) * 0.2;
+      this._centralHalo.scale.set(3 * pulse, 3 * pulse, 1);
+    }
+
+    // Orbiting ring particles
+    if (this._ringParticles && this._ringData) {
+      const pos = this._ringParticles.geometry.attributes.position.array;
+      for (let i = 0; i < this._ringData.length; i++) {
+        const d = this._ringData[i];
+        const a = d.angle + time * d.speed;
+        pos[i * 3] = Math.cos(a) * d.radius;
+        pos[i * 3 + 1] = d.height + Math.sin(time * 1.3 + i) * 0.05;
+        pos[i * 3 + 2] = Math.sin(a) * d.radius;
+      }
+      this._ringParticles.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Subtle nebula opacity breathing
+    if (this._nebulaClouds) {
+      for (let i = 0; i < this._nebulaClouds.length; i++) {
+        const cloud = this._nebulaClouds[i];
+        const breathe = 0.28 + Math.sin(time * 0.4 + i) * 0.08;
+        cloud.material.opacity = breathe;
+      }
+    }
+
+    // Twinkling starfield rotation
+    if (this.starfield) {
+      this.starfield.rotation.y += delta * 0.015;
+      this.starfield.rotation.x += delta * 0.005;
+    }
+
+    this.renderer.render(this.scene, this.camera);
   }
 
   // ── Cleanup ──────────────────────────────────────────────
 
   dispose() {
     if (this.animationId) cancelAnimationFrame(this.animationId);
+    this.controls?.dispose();
     window.removeEventListener("resize", this._onResize);
-    if (this.canvas) {
-      this.canvas.remove();
+    if (this._tooltipEl) this._tooltipEl.remove();
+    this.scene?.traverse((obj) => {
+      if (obj.geometry && obj.geometry !== this._noteMesh?.geometry) {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach((m) => {
+            if (m.map) m.map.dispose();
+            m.dispose();
+          });
+        } else {
+          if (obj.material.map) obj.material.map.dispose();
+          obj.material.dispose();
+        }
+      }
+    });
+    // Dispose InstancedMesh separately (its geometry is shared)
+    if (this._noteMesh) {
+      this._noteMesh.geometry.dispose();
+      if (Array.isArray(this._noteMesh.material)) {
+        this._noteMesh.material.forEach((m) => m.dispose());
+      } else {
+        this._noteMesh.material.dispose();
+      }
     }
-    this._breathingRipples = [];
-    this._subHitAreas = [];
-    this._particles = null;
-    this._stoneShapes = {};
-  }
-
-  // ── Color Helpers ────────────────────────────────────────
-
-  _lightenColor(hex, percent) {
-    const num = parseInt(hex.replace("#", ""), 16);
-    const r = Math.min(255, (num >> 16) + percent);
-    const g = Math.min(255, ((num >> 8) & 0x00ff) + percent);
-    const b = Math.min(255, (num & 0x0000ff) + percent);
-    return `rgb(${r},${g},${b})`;
-  }
-
-  _darkenColor(hex, percent) {
-    const num = parseInt(hex.replace("#", ""), 16);
-    const r = Math.max(0, (num >> 16) - percent);
-    const g = Math.max(0, ((num >> 8) & 0x00ff) - percent);
-    const b = Math.max(0, (num & 0x0000ff) - percent);
-    return `rgb(${r},${g},${b})`;
+    this.renderer?.dispose();
+    if (this.renderer?.domElement) {
+      this.renderer.domElement.remove();
+    }
   }
 }
 
@@ -823,48 +1008,35 @@ class AtlasHomepageView extends ItemView {
     this.scene = null;
   }
 
-  getViewType() {
-    return VIEW_TYPE;
-  }
-
-  getDisplayText() {
-    return "Atlas · 枯山水";
-  }
-
-  getIcon() {
-    return "globe";
-  }
+  getViewType() { return VIEW_TYPE; }
+  getDisplayText() { return "Atlas · 星空星座图"; }
+  getIcon() { return "globe"; }
 
   async onOpen() {
     const container =
-      this.leaf.view.containerEl.children[1] ||
-      this.leaf.view.containerEl;
+      this.leaf.view.containerEl.children[1] || this.leaf.view.containerEl;
     container.empty();
     container.addClass("atlas-homepage-container");
 
-    // Loading overlay
+    // Loading
     const loadingEl = container.createDiv("atlas-homepage-loading");
-    loadingEl.createDiv("loading-zen-circle");
-    loadingEl.createDiv("loading-text").setText("枯山水を描いている...");
+    loadingEl.createDiv("loading-star");
+    loadingEl.createDiv("loading-text").setText("绘制星图...");
 
     try {
-      // Create the zen garden scene (no Three.js needed!)
-      this.scene = new ZenGardenScene(container, this.plugin.app);
+      const THREE = await ensureThreeJS();
 
-      // Fade out loading
-      loadingEl.addClass("hidden");
-      setTimeout(() => loadingEl.remove(), 600);
+      this.scene = new ConstellationScene(container, THREE, this.plugin.app, () => {
+        loadingEl.addClass("hidden");
+        setTimeout(() => loadingEl.remove(), 600);
+      });
 
-      // Info overlay
       const infoEl = container.createDiv("atlas-homepage-info");
-      infoEl.setText("点击庭石 · 探索你的知识园林");
+      infoEl.setText("拖拽旋转 · 滚轮缩放 · 点击星辰打开笔记");
 
-      // Stats bar
       this._createStatsBar(container);
     } catch (err) {
-      loadingEl.querySelector(".loading-text")?.setText(
-        "加载失败，请重试"
-      );
+      loadingEl.querySelector(".loading-text")?.setText("加载失败，请检查网络连接后重试");
       console.error("[Atlas Homepage] Failed to load:", err);
     }
   }
@@ -873,25 +1045,21 @@ class AtlasHomepageView extends ItemView {
     const statsEl = container.createDiv("atlas-homepage-stats");
 
     try {
-      const counts = {};
+      const files = this.plugin.app.vault.getMarkdownFiles();
+      let totalLinks = 0;
+
       for (const area of AREAS) {
-        const files = this.plugin.app.vault
-          .getFiles()
-          .filter(
-            (f) => f.path.startsWith(area.path) && f.extension === "md"
-          );
-        counts[area.id] = files.length;
+        const areaFiles = files.filter((f) => f.path.startsWith(area.path + "/"));
+        for (const f of areaFiles) {
+          const cache = this.plugin.app.metadataCache.getFileCache(f);
+          totalLinks += (cache?.links?.length || 0);
+        }
       }
 
-      const total = Object.values(counts).reduce((a, b) => a + b, 0);
       const statItems = [
-        { label: "笔记", value: total.toString(), color: "#8b7355" },
-        { label: "庭石", value: AREAS.length.toString(), color: "#a09080" },
-        ...AREAS.map((a) => ({
-          label: a.ename,
-          value: (counts[a.id] || 0).toString(),
-          color: a.color,
-        })),
+        { label: "笔记", value: files.length.toString(), color: "#ddeeff" },
+        { label: "链接", value: totalLinks.toString(), color: "#aaccff" },
+        { label: "星域", value: (AREAS.length + EXTRA_NODES.length).toString(), color: "#8899bb" },
       ];
 
       statItems.forEach((item) => {
@@ -900,9 +1068,7 @@ class AtlasHomepageView extends ItemView {
         dot.style.backgroundColor = item.color;
         div.createSpan().setText(`${item.label} ${item.value}`);
       });
-    } catch (_) {
-      // Stats are optional, don't break on error
-    }
+    } catch (_) {}
   }
 
   async onClose() {
@@ -921,13 +1087,11 @@ class AtlasHomepagePlugin extends Plugin {
   async onload() {
     this.registerView(VIEW_TYPE, (leaf) => new AtlasHomepageView(leaf, this));
 
-    this.addRibbonIcon("globe", "打开 Atlas 枯山水", () => {
-      this.activateView();
-    });
+    this.addRibbonIcon("globe", "打开 Atlas 星空星座图", () => this.activateView());
 
     this.addCommand({
       id: "open-atlas-homepage",
-      name: "打开 Atlas 枯山水",
+      name: "打开 Atlas 星空星座图",
       callback: () => this.activateView(),
     });
   }
@@ -942,14 +1106,10 @@ class AtlasHomepagePlugin extends Plugin {
     let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
     if (!leaf) {
       leaf = workspace.getLeaf(true);
-      await leaf.setViewState({
-        type: VIEW_TYPE,
-        active: true,
-      });
+      await leaf.setViewState({ type: VIEW_TYPE, active: true });
     }
     workspace.revealLeaf(leaf);
   }
 }
 
-// Export
 module.exports = AtlasHomepagePlugin;

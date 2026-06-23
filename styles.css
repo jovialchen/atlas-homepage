@@ -1,7 +1,7 @@
-/* Atlas Homepage — 枯山水 · Zen Garden
- * A Canvas 2D powered homepage for the Atlas vault.
- * Japanese dry landscape garden aesthetic.
- * Zero dependencies — no Three.js needed.
+/* Atlas Homepage — 星空星座图 · Constellation Graph
+ * A Three.js powered 3D constellation map for the Atlas vault.
+ * Each note is a star, wikilinks are constellation lines,
+ * and Areas form colorful nebulae. Deep space aesthetic.
  */
 
 /* ── View Container ── */
@@ -10,8 +10,8 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #f5f0e8;
-  font-family: Georgia, 'Noto Serif SC', 'KaiTi', 'Segoe UI', serif;
+  background: #080c14;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 .atlas-homepage-container canvas {
@@ -26,7 +26,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #f5f0e8;
+  background: #080c14;
   z-index: 10;
   transition: opacity 0.6s ease;
 }
@@ -36,22 +36,23 @@
   pointer-events: none;
 }
 
-.atlas-homepage-loading .loading-zen-circle {
-  width: 54px;
-  height: 54px;
-  border: 2px solid #b0a590;
-  border-top-color: #8b7355;
+.atlas-homepage-loading .loading-star {
+  width: 48px;
+  height: 48px;
+  border: 2px solid rgba(150, 180, 220, 0.3);
+  border-top-color: #aaccff;
   border-radius: 50%;
-  animation: zen-spin 1.8s linear infinite;
+  animation: star-spin 1.6s linear infinite;
+  box-shadow: 0 0 20px rgba(150, 180, 240, 0.2);
 }
 
-@keyframes zen-spin {
+@keyframes star-spin {
   to { transform: rotate(360deg); }
 }
 
 .atlas-homepage-loading .loading-text {
   margin-top: 18px;
-  color: #8b7355;
+  color: #8899bb;
   font-size: 14px;
   font-style: italic;
   letter-spacing: 1px;
@@ -62,7 +63,7 @@
   position: absolute;
   bottom: 20px;
   left: 24px;
-  color: #a09080;
+  color: #667a99;
   font-size: 11px;
   opacity: 0.65;
   pointer-events: none;
@@ -78,14 +79,14 @@
   display: flex;
   gap: 16px;
   font-size: 11px;
-  color: #a09080;
+  color: #667a99;
   pointer-events: none;
 }
 
 .atlas-homepage-stats .stat-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .atlas-homepage-stats .stat-dot {
@@ -93,6 +94,12 @@
   height: 6px;
   border-radius: 50%;
   display: inline-block;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* ── Constellation Tooltip ── */
+.constellation-tooltip {
+  box-shadow: 0 0 12px rgba(100, 140, 200, 0.15);
 }
 
 /* ── Responsive ── */
