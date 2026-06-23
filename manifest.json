@@ -1,0 +1,10 @@
+{
+  "id": "atlas-homepage",
+  "name": "Atlas Homepage",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "A hand-drawn 3D life map homepage for the Atlas vault. Powered by Three.js with sketch-style rendering, showing your Areas as floating islands in a paper-crafted world.",
+  "author": "Joyce",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}
