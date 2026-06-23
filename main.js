@@ -1,13 +1,13 @@
 /**
- * Atlas Homepage — Hand-drawn 3D Life Map
+ * Atlas Homepage — Floating Island Ocean
  * ==========================================
  * A custom Obsidian homepage plugin for the Atlas vault.
- * Renders a Three.js 3D scene with a hand-drawn / sketch aesthetic,
- * turning your PARA-structured knowledge base into an interactive
- * floating map of paper-crafted islands.
+ * Renders a Three.js 3D scene with a Ghibli-inspired floating
+ * island ocean aesthetic — organic islands, animated water,
+ * drifting clouds, and glowing fireflies.
  *
  * Vault: Atlas (PARA + Learning/Logs/Inbox)
- * Style: Hand-drawn, ink-wash, paper texture, cel-shaded
+ * Style: Floating islands, ocean water, warm sky, organic terrain
  */
 
 "use strict";
@@ -146,63 +146,184 @@ const EXTRA_NODES = [
 ];
 
 const AREA_RING_RADIUS = 4.5;
-const ISLAND_SIZE = 1.6;
-const ISLAND_HEIGHT = 0.25;
 
 // ═══════════════════════════════════════════════════════════
-// PAPER TEXTURE GENERATOR (procedural)
+// TERRAIN & DECORATION HELPERS
 // ═══════════════════════════════════════════════════════════
 
-function generatePaperTexture(width, height) {
+/**
+ * Displace cylinder vertices radially with layered sine noise
+ * to create organic island coastlines.
+ */
+function displaceIslandVertices(geometry, seed) {
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const angle = Math.atan2(z, x);
+    const radius = Math.sqrt(x * x + z * z);
+    if (radius < 0.02) continue; // skip center vertices
+
+    const n =
+      Math.sin(angle * 5.3 + seed) * 0.09 +
+      Math.sin(angle * 3.1 + seed * 1.7) * 0.06 +
+      Math.sin(angle * 7.7 + seed * 0.4) * 0.04 +
+      Math.cos(angle * 2.3 + seed * 2.1) * 0.03;
+    const newR = Math.max(0.12, radius + n);
+    pos.setXYZ(i, Math.cos(angle) * newR, y, Math.sin(angle) * newR);
+  }
+  geometry.computeVertexNormals();
+}
+
+/**
+ * Create a simple procedural tree: cylinder trunk + stacked cone foliage.
+ * Returns a THREE.Group.
+ */
+function createTree(THREE, height, foliageRadius, seed) {
+  const group = new THREE.Group();
+  const rand = mulberry32(seed);
+
+  // Trunk
+  const trunkH = height * 0.45;
+  const trunkGeo = new THREE.CylinderGeometry(0.03, 0.06, trunkH, 6);
+  const trunkMat = new THREE.MeshStandardMaterial({
+    color: 0x8b6914,
+    roughness: 0.7,
+  });
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.y = trunkH / 2;
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  group.add(trunk);
+
+  // Foliage layers (2-3 cones stacked)
+  const layers = 2 + Math.floor(rand() * 2);
+  for (let i = 0; i < layers; i++) {
+    const r = foliageRadius * (1 - i * 0.28);
+    const coneH = height * 0.38;
+    const coneGeo = new THREE.ConeGeometry(r, coneH, 8, 2);
+    const hue = 0.18 + rand() * 0.14; // green range
+    const sat = 0.5 + rand() * 0.3;
+    const light = 0.28 + i * 0.08 + rand() * 0.06;
+    const color = new THREE.Color().setHSL(hue, sat, light);
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: color,
+      roughness: 0.55,
+    });
+    const cone = new THREE.Mesh(coneGeo, coneMat);
+    cone.position.y = trunkH + i * coneH * 0.65;
+    cone.castShadow = true;
+    cone.receiveShadow = true;
+    group.add(cone);
+  }
+
+  return group;
+}
+
+/**
+ * Simple seeded PRNG for tree variation (mulberry32).
+ */
+function mulberry32(a) {
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Create a cloud group from overlapping spheres.
+ */
+function createCloudGroup(THREE, seed) {
+  const group = new THREE.Group();
+  const rand = mulberry32(seed);
+  const count = 5 + Math.floor(rand() * 6);
+  const cloudMat = new THREE.MeshStandardMaterial({
+    color: 0xfffef8,
+    roughness: 0.9,
+    transparent: true,
+    opacity: 0.78,
+  });
+
+  for (let i = 0; i < count; i++) {
+    const r = 0.18 + rand() * 0.45;
+    const geo = new THREE.SphereGeometry(r, 8, 6);
+    const blob = new THREE.Mesh(geo, cloudMat);
+    blob.position.set(
+      (rand() - 0.5) * 1.4,
+      (rand() - 0.5) * 0.35,
+      (rand() - 0.5) * 1.2
+    );
+    blob.castShadow = false;
+    blob.receiveShadow = false;
+    group.add(blob);
+  }
+
+  return group;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SPRITE LABEL HELPER
+// ═══════════════════════════════════════════════════════════
+
+function createLabelSprite(text, icon, colorHex) {
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = 512;
+  canvas.height = 256;
   const ctx = canvas.getContext("2d");
 
-  // Base: warm cream paper
-  ctx.fillStyle = "#f5f0e8";
-  ctx.fillRect(0, 0, width, height);
+  // Soft pill background for readability (manual rounded rect for compat)
+  const pillW = 280;
+  const pillH = 110;
+  const pillX = (512 - pillW) / 2;
+  const pillY = (256 - pillH) / 2 - 10;
+  const pillR = 24;
+  ctx.fillStyle = "rgba(255, 254, 248, 0.72)";
+  ctx.beginPath();
+  ctx.moveTo(pillX + pillR, pillY);
+  ctx.lineTo(pillX + pillW - pillR, pillY);
+  ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + pillR, pillR);
+  ctx.lineTo(pillX + pillW, pillY + pillH - pillR);
+  ctx.arcTo(pillX + pillW, pillY + pillH, pillX + pillW - pillR, pillY + pillH, pillR);
+  ctx.lineTo(pillX + pillR, pillY + pillH);
+  ctx.arcTo(pillX, pillY + pillH, pillX, pillY + pillH - pillR, pillR);
+  ctx.lineTo(pillX, pillY + pillR);
+  ctx.arcTo(pillX, pillY, pillX + pillR, pillY, pillR);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(180, 170, 150, 0.35)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
-  // Grain noise
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const noise = (Math.random() - 0.5) * 18;
-    data[i] = Math.min(255, Math.max(0, data[i] + noise));
-    data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise));
-    data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise - 2));
-  }
-  ctx.putImageData(imageData, 0, 0);
+  // Icon
+  ctx.font = "48px serif";
+  ctx.textAlign = "center";
+  ctx.fillText(icon, 256, pillY + 48);
 
-  // Subtle fiber texture (horizontal lines)
-  ctx.strokeStyle = "rgba(180,160,130,0.06)";
-  ctx.lineWidth = 1;
-  for (let y = 0; y < height; y += 3) {
-    ctx.beginPath();
-    ctx.moveTo(0, y + Math.random() * 2);
-    ctx.lineTo(width, y + Math.random() * 2);
-    ctx.stroke();
-  }
+  // Text
+  ctx.font = "bold 28px Georgia, 'Noto Serif SC', 'Segoe UI', serif";
+  ctx.fillStyle = "#4a3728";
+  ctx.textAlign = "center";
+  ctx.fillText(text, 256, pillY + 80);
 
-  // Subtle stains / age spots
-  for (let i = 0; i < 5; i++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    const r = 20 + Math.random() * 80;
-    const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-    gradient.addColorStop(0, "rgba(180,160,130,0.08)");
-    gradient.addColorStop(1, "rgba(180,160,130,0)");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Clean underline
+  const textWidth = ctx.measureText(text).width;
+  const underlineY = pillY + 92;
+  ctx.strokeStyle = colorHex || "#8ec8d0";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(256 - textWidth / 2, underlineY);
+  ctx.lineTo(256 + textWidth / 2, underlineY);
+  ctx.stroke();
 
   return canvas;
 }
 
 // ═══════════════════════════════════════════════════════════
-// CUSTOM ORBIT CONTROLS (hand-drawn wobble)
+// CUSTOM ORBIT CONTROLS (smooth cinematic feel)
 // ═══════════════════════════════════════════════════════════
 
 class SketchOrbitControls {
@@ -315,7 +436,6 @@ class SketchOrbitControls {
     if (this.autoRotate && !this._isDragging) {
       this.spherical.theta += this.autoRotateSpeed * deltaTime;
     } else if (!this._isDragging) {
-      // Damping velocity
       this.spherical.theta += this._velocity.theta;
       this.spherical.phi += this._velocity.phi;
       this._velocity.theta *= 1 - this.dampingFactor;
@@ -326,13 +446,13 @@ class SketchOrbitControls {
       );
     }
 
-    // Wobble: subtle hand-drawn jitter
+    // Minimal wobble for subtle organic feel (vs old 0.003 sketchy wobble)
     const wobble = this._isDragging
       ? 0
-      : Math.sin(Date.now() * 0.0007) * 0.003;
+      : Math.sin(Date.now() * 0.0007) * 0.0005;
     const wobble2 = this._isDragging
       ? 0
-      : Math.cos(Date.now() * 0.0009) * 0.003;
+      : Math.cos(Date.now() * 0.0009) * 0.0005;
 
     this.camera.position.x =
       this.target.x +
@@ -362,47 +482,7 @@ class SketchOrbitControls {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SPRITE LABEL HELPER
-// ═══════════════════════════════════════════════════════════
-
-function createLabelSprite(text, icon, colorHex) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d");
-
-  // Icon
-  ctx.font = "36px serif";
-  ctx.textAlign = "center";
-  ctx.fillText(icon, 128, 42);
-
-  // Text — hand-drawn feel via slight rotation variance
-  ctx.font = "bold 22px 'Segoe UI', system-ui, sans-serif";
-  ctx.fillStyle = "#3d3226";
-  ctx.textAlign = "center";
-  ctx.fillText(text, 128, 76);
-
-  // Subtle underline (sketch-like)
-  ctx.strokeStyle = colorHex || "#c4b5a0";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  const textWidth = ctx.measureText(text).width;
-  const startX = 128 - textWidth / 2;
-  ctx.moveTo(startX, 84);
-  // Slightly wavy underline
-  for (let x = 0; x < textWidth; x += 8) {
-    ctx.lineTo(
-      startX + x,
-      84 + Math.sin(x * 0.4) * 1.5
-    );
-  }
-  ctx.stroke();
-
-  return canvas;
-}
-
-// ═══════════════════════════════════════════════════════════
-// 3D LIFE MAP SCENE
+// 3D LIFE MAP SCENE — Floating Island Ocean
 // ═══════════════════════════════════════════════════════════
 
 class LifeMapScene {
@@ -430,13 +510,12 @@ class LifeMapScene {
     );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor(0xf5f0e8);
+    this.renderer.setClearColor(0xb8d8e3); // pale sky blue
     this.container.appendChild(this.renderer.domElement);
 
     // --- Scene ---
     this.scene = new THREE.Scene();
-    // Subtle fog for depth atmosphere
-    this.scene.fog = new THREE.Fog(0xf5f0e8, 8, 28);
+    this.scene.fog = new THREE.Fog(0xe8f0f0, 12, 38);
 
     // --- Camera ---
     this.camera = new THREE.PerspectiveCamera(
@@ -454,13 +533,17 @@ class LifeMapScene {
     );
 
     // --- Lighting ---
-    // Soft ambient (ink-wash)
-    const ambient = new THREE.AmbientLight(0xfff8ee, 0.7);
+    // Warm ambient base
+    const ambient = new THREE.AmbientLight(0xfff5e6, 0.45);
     this.scene.add(ambient);
 
-    // Main directional light (cast shadows, like afternoon sun)
-    const sun = new THREE.DirectionalLight(0xfff5e6, 1.0);
-    sun.position.set(8, 14, 2);
+    // Hemisphere: warm sky above, cool earth below
+    const hemi = new THREE.HemisphereLight(0xffeedd, 0x6b8a7a, 0.5);
+    this.scene.add(hemi);
+
+    // Main sun (afternoon glow from above-right)
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.3);
+    sun.position.set(12, 16, 4);
     sun.castShadow = true;
     sun.shadow.mapSize.width = 1024;
     sun.shadow.mapSize.height = 1024;
@@ -470,31 +553,22 @@ class LifeMapScene {
     sun.shadow.camera.right = 15;
     sun.shadow.camera.top = 15;
     sun.shadow.camera.bottom = -15;
-    sun.shadow.bias = -0.0001;
+    sun.shadow.bias = -0.0003;
     this.scene.add(sun);
 
-    // Fill light (cooler, from opposite side)
-    const fill = new THREE.DirectionalLight(0xd8e8ff, 0.35);
-    fill.position.set(-4, 3, -4);
+    // Cool fill light (water reflection blue from opposite side)
+    const fill = new THREE.DirectionalLight(0x88ccdd, 0.3);
+    fill.position.set(-5, 2, -5);
     this.scene.add(fill);
 
-    // --- Paper Ground ---
-    this._createPaperGround();
-
-    // --- Area Islands ---
+    // --- Scene Elements ---
+    this._createOcean();
     this._createAreaIslands();
-
-    // --- Extra Nodes ---
     this._createExtraNodes();
-
-    // --- Connecting Lines ---
-    this._createConnectingLines();
-
-    // --- Floating Particles ---
-    this._createParticles();
-
-    // --- Compass Rose ---
-    this._createCompassRose();
+    this._createSteppingStones();
+    this._createClouds();
+    this._createFireflies();
+    this._createCentralTree();
 
     // --- Raycaster for interaction ---
     this.raycaster = new THREE.Raycaster();
@@ -517,141 +591,161 @@ class LifeMapScene {
     this._animate();
   }
 
-  _createPaperGround() {
+  // ── Ocean Water ──────────────────────────────────────────
+
+  _createOcean() {
     const THREE = this.THREE;
+    const size = 24;
+    const segs = 32;
+    const geo = new THREE.PlaneGeometry(size, size, segs, segs);
+    geo.rotateX(-Math.PI / 2);
 
-    // Large paper plane
-    const paperTexCanvas = generatePaperTexture(1024, 1024);
-    const paperTex = new THREE.CanvasTexture(paperTexCanvas);
-    paperTex.wrapS = THREE.RepeatWrapping;
-    paperTex.wrapT = THREE.RepeatWrapping;
-    paperTex.repeat.set(3, 3);
-
-    const groundGeo = new THREE.PlaneGeometry(22, 22);
-    const groundMat = new THREE.MeshStandardMaterial({
-      map: paperTex,
-      color: 0xf5f0e8,
-      roughness: 0.85,
-      metalness: 0.02,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -1.5;
-    ground.receiveShadow = true;
-    ground.name = "paper-ground";
-    this.scene.add(ground);
-
-    // Subtle grid lines (hand-drawn dotted)
-    const gridGroup = new THREE.Group();
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0xddd5c5 });
-    const dotGeo = new THREE.SphereGeometry(0.04, 4, 4);
-
-    for (let x = -9; x <= 9; x += 1.5) {
-      for (let z = -9; z <= 9; z += 1.5) {
-        if (Math.random() > 0.65) continue; // random gaps for hand-drawn feel
-        const dot = new THREE.Mesh(dotGeo, dotMat);
-        dot.position.set(x + (Math.random() - 0.5) * 0.4, -1.48, z + (Math.random() - 0.5) * 0.4);
-        gridGroup.add(dot);
-      }
+    // Cache original Y positions for wave animation
+    const posArr = geo.attributes.position.array;
+    this._waterOrigY = new Float32Array(posArr.length / 3);
+    for (let i = 0; i < this._waterOrigY.length; i++) {
+      this._waterOrigY[i] = posArr[i * 3 + 1];
     }
-    gridGroup.name = "paper-dots";
-    this.scene.add(gridGroup);
+
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x5b9aa0,
+      specular: 0x8ec8d0,
+      shininess: 80,
+      transparent: true,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
+    });
+
+    this.water = new THREE.Mesh(geo, mat);
+    this.water.position.y = -1.2;
+    this.water.receiveShadow = true;
+    this.water.name = "water";
+    this.scene.add(this.water);
+
+    // Ocean floor for depth illusion
+    const floorGeo = new THREE.PlaneGeometry(size, size);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0x1a4a5a });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -1.35;
+    floor.name = "ocean-floor";
+    this.scene.add(floor);
   }
+
+  _animateWater(time) {
+    if (!this.water) return;
+    const pos = this.water.geometry.attributes.position;
+    const arr = pos.array;
+    const count = pos.count;
+
+    for (let i = 0; i < count; i++) {
+      const origY = this._waterOrigY[i];
+      const x = arr[i * 3];
+      const z = arr[i * 3 + 2];
+
+      const wave1 =
+        Math.sin(x * 0.8 + time * 1.2) * Math.cos(z * 0.6 + time * 0.9) * 0.12;
+      const wave2 =
+        Math.sin(x * 0.4 - time * 0.7 + 1.5) *
+        Math.sin(z * 0.5 + time * 1.1) *
+        0.08;
+      const wave3 = Math.cos(x * 1.1 + z * 0.9 + time * 0.5) * 0.05;
+
+      arr[i * 3 + 1] = origY + wave1 + wave2 + wave3;
+    }
+    pos.needsUpdate = true;
+    this.water.geometry.computeVertexNormals();
+  }
+
+  // ── Area Islands (organic terrain) ───────────────────────
 
   _createAreaIslands() {
     const THREE = this.THREE;
     this.areaGroups = [];
 
-    AREAS.forEach((area) => {
+    AREAS.forEach((area, idx) => {
       const group = new THREE.Group();
       const x = Math.cos(area.angle) * AREA_RING_RADIUS;
       const z = Math.sin(area.angle) * AREA_RING_RADIUS;
       group.position.set(x, 0, z);
 
-      // Slight random tilt for hand-drawn feel
-      group.rotation.x = (Math.random() - 0.5) * 0.05;
-      group.rotation.z = (Math.random() - 0.5) * 0.05;
+      // Slight random tilt
+      const tiltX = (Math.sin(idx * 2.7) * 0.04);
+      const tiltZ = (Math.cos(idx * 1.8) * 0.04);
+      group.rotation.x = tiltX;
+      group.rotation.z = tiltZ;
 
-      // --- Island Base (rounded box with edge outlines) ---
-      const baseGeo = new THREE.BoxGeometry(
-        ISLAND_SIZE,
-        ISLAND_HEIGHT,
-        ISLAND_SIZE
-      );
+      // --- Island body (CylinderGeometry with displacement) ---
+      const bodyGeo = new THREE.CylinderGeometry(0.7, 1.05, 0.5, 20, 4);
+      displaceIslandVertices(bodyGeo, idx * 37 + 5);
 
-      // Cel-shaded / toon material for hand-drawn look
-      const baseMat = new THREE.MeshToonMaterial({
-        color: area.color,
-        // Lighter tint for the toon gradient
-      });
-      const base = new THREE.Mesh(baseGeo, baseMat);
-      base.position.y = ISLAND_HEIGHT / 2;
-      base.castShadow = true;
-      base.receiveShadow = true;
-      base.name = `island-${area.id}`;
-      group.add(base);
+      const bodyMats = [
+        // side (earth)
+        new THREE.MeshStandardMaterial({
+          color: 0x9b7b4a,
+          roughness: 0.75,
+          metalness: 0.05,
+        }),
+        // top (grass)
+        new THREE.MeshStandardMaterial({
+          color: 0x8db255,
+          roughness: 0.65,
+          metalness: 0.02,
+        }),
+        // bottom (dark earth)
+        new THREE.MeshStandardMaterial({
+          color: 0x6b5030,
+          roughness: 0.8,
+        }),
+      ];
+      const body = new THREE.Mesh(bodyGeo, bodyMats);
+      body.position.y = 0.25; // half height
+      body.castShadow = true;
+      body.receiveShadow = true;
+      body.name = `island-${area.id}`;
+      group.add(body);
 
-      // --- Sketchy Edge Outline ---
-      const edgeGeo = new THREE.EdgesGeometry(baseGeo, 30);
-      // First outline pass (thicker, darker)
-      const edgeLine1 = new THREE.LineSegments(
-        edgeGeo,
-        new THREE.LineBasicMaterial({
-          color: 0x3d3226,
-          linewidth: 1,
-          transparent: true,
-          opacity: 0.35,
-        })
-      );
-      edgeLine1.position.y = ISLAND_HEIGHT / 2;
-      group.add(edgeLine1);
+      // --- Trees ---
+      const treeCount = 2 + (idx % 3); // 2–4 trees
+      for (let t = 0; t < treeCount; t++) {
+        const tAngle = (t / treeCount) * Math.PI * 2 + idx * 0.7;
+        const tRadius = 0.25 + (t % 2) * 0.15;
+        const tree = createTree(
+          THREE,
+          0.28 + (t % 3) * 0.04,
+          0.11 + (t % 2) * 0.04,
+          idx * 100 + t
+        );
+        tree.position.set(
+          Math.cos(tAngle) * tRadius,
+          0.52,
+          Math.sin(tAngle) * tRadius
+        );
+        tree.scale.setScalar(0.8 + Math.random() * 0.4);
+        group.add(tree);
+      }
 
-      // Second pass (offset, sketchy)
-      const edgeLine2 = new THREE.LineSegments(
-        edgeGeo,
-        new THREE.LineBasicMaterial({
-          color: 0x5c4a3a,
-          linewidth: 1,
-          transparent: true,
-          opacity: 0.15,
-        })
-      );
-      edgeLine2.position.y = ISLAND_HEIGHT / 2;
-      edgeLine2.position.x += 0.03;
-      edgeLine2.position.z += 0.02;
-      group.add(edgeLine2);
-
-      // --- Subfolder mini-blocks on the island ---
+      // --- Subfolder indicators (small spheres on surface) ---
       const subCount = area.subfolders.length;
       area.subfolders.forEach((sub, i) => {
-        const subSize = 0.22;
-        const subGeo = new THREE.BoxGeometry(subSize, 0.12, subSize);
-        const subMat = new THREE.MeshToonMaterial({
+        const sAngle = (i / Math.max(subCount, 1)) * Math.PI * 2 + 0.3;
+        const sRadius = 0.4;
+        const sphereGeo = new THREE.SphereGeometry(0.06, 8, 6);
+        const sphereMat = new THREE.MeshStandardMaterial({
           color: area.subColor,
+          roughness: 0.4,
+          emissive: area.subColor,
+          emissiveIntensity: 0.15,
         });
-        const subMesh = new THREE.Mesh(subGeo, subMat);
-        subMesh.position.y = ISLAND_HEIGHT + 0.06;
-
-        // Arrange sub-blocks on the island surface
-        const angle = (i / subCount) * Math.PI * 2;
-        const subRadius = ISLAND_SIZE * 0.35;
-        subMesh.position.x = Math.cos(angle) * subRadius;
-        subMesh.position.z = Math.sin(angle) * subRadius;
-        subMesh.castShadow = true;
-        subMesh.name = `sub-${area.id}-${sub}`;
-        group.add(subMesh);
-
-        // Mini outline
-        const subEdge = new THREE.LineSegments(
-          new THREE.EdgesGeometry(subGeo),
-          new THREE.LineBasicMaterial({
-            color: 0x5c4a3a,
-            transparent: true,
-            opacity: 0.2,
-          })
+        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+        sphere.position.set(
+          Math.cos(sAngle) * sRadius,
+          0.52,
+          Math.sin(sAngle) * sRadius
         );
-        subEdge.position.copy(subMesh.position);
-        group.add(subEdge);
+        sphere.castShadow = true;
+        sphere.name = `sub-${area.id}-${sub}`;
+        group.add(sphere);
       });
 
       // --- Label Sprite ---
@@ -668,12 +762,12 @@ class LifeMapScene {
         depthTest: false,
       });
       const label = new THREE.Sprite(labelMat);
-      label.position.y = ISLAND_HEIGHT + 0.65;
+      label.position.y = 0.95;
       label.scale.set(2.0, 1.0, 1);
       label.name = `label-${area.id}`;
       group.add(label);
 
-      // --- Store metadata ---
+      // --- Metadata for animation ---
       group.userData = {
         areaId: area.id,
         areaPath: area.path,
@@ -683,46 +777,60 @@ class LifeMapScene {
         bobPhase: Math.random() * Math.PI * 2,
         bobSpeed: 0.4 + Math.random() * 0.6,
         bobAmp: 0.08 + Math.random() * 0.12,
+        rotPhase: Math.random() * Math.PI * 2,
+        rotSpeed: 0.2 + Math.random() * 0.3,
       };
 
       this.scene.add(group);
-      this.clickableObjects.push(base);
+      this.clickableObjects.push(body);
       this.areaGroups.push(group);
     });
   }
+
+  // ── Extra Nodes (mini floating islands) ──────────────────
 
   _createExtraNodes() {
     const THREE = this.THREE;
     this.extraGroups = [];
 
-    EXTRA_NODES.forEach((node) => {
+    EXTRA_NODES.forEach((node, idx) => {
       const group = new THREE.Group();
       const x = Math.cos(node.angle) * node.distance;
       const z = Math.sin(node.angle) * node.distance;
       group.position.set(x, 0.35, z);
 
-      // Small floating platform
-      const platGeo = new THREE.CylinderGeometry(0.35, 0.4, 0.12, 6);
-      const platMat = new THREE.MeshToonMaterial({ color: node.color });
-      const platform = new THREE.Mesh(platGeo, platMat);
-      platform.position.y = 0.06;
-      platform.castShadow = true;
-      platform.receiveShadow = true;
-      platform.name = `extra-${node.id}`;
-      group.add(platform);
+      // Mini island body
+      const bodyGeo = new THREE.CylinderGeometry(0.22, 0.38, 0.22, 14, 3);
+      displaceIslandVertices(bodyGeo, idx * 53 + 17);
 
-      // Hex edge outline
-      const edgeGeo = new THREE.EdgesGeometry(platGeo);
-      const edgeLine = new THREE.LineSegments(
-        edgeGeo,
-        new THREE.LineBasicMaterial({
-          color: 0x3d3226,
-          transparent: true,
-          opacity: 0.3,
-        })
-      );
-      edgeLine.position.y = 0.06;
-      group.add(edgeLine);
+      const bodyMats = [
+        new THREE.MeshStandardMaterial({
+          color: 0x9b7b4a,
+          roughness: 0.75,
+          metalness: 0.05,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(node.color).multiplyScalar(0.7),
+          roughness: 0.6,
+          metalness: 0.02,
+        }),
+        new THREE.MeshStandardMaterial({
+          color: 0x6b5030,
+          roughness: 0.8,
+        }),
+      ];
+      const body = new THREE.Mesh(bodyGeo, bodyMats);
+      body.position.y = 0.11;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      body.name = `extra-${node.id}`;
+      group.add(body);
+
+      // Small tree/bush
+      const miniTree = createTree(THREE, 0.18, 0.07, idx * 200 + 42);
+      miniTree.position.y = 0.23;
+      miniTree.scale.setScalar(0.65);
+      group.add(miniTree);
 
       // Label
       const labelCanvas = createLabelSprite(
@@ -751,144 +859,331 @@ class LifeMapScene {
         bobPhase: Math.random() * Math.PI * 2,
         bobSpeed: 0.3 + Math.random() * 0.5,
         bobAmp: 0.05 + Math.random() * 0.08,
+        rotPhase: Math.random() * Math.PI * 2,
+        rotSpeed: 0.15 + Math.random() * 0.25,
       };
 
       this.scene.add(group);
-      this.clickableObjects.push(platform);
+      this.clickableObjects.push(body);
       this.extraGroups.push(group);
     });
   }
 
-  _createConnectingLines() {
+  // ── Stepping Stones (underwater paths) ───────────────────
+
+  _createSteppingStones() {
     const THREE = this.THREE;
 
-    // Draw hand-drawn style curved lines from center to each area
-    this.areaGroups.forEach((group) => {
-      const points = [];
-      const tx = group.position.x;
-      const tz = group.position.z;
-      const segments = 40;
+    // Subtle concentric rings at water level suggesting paths
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0xb5c8c0,
+      roughness: 0.7,
+      transparent: true,
+      opacity: 0.18,
+    });
 
-      for (let i = 0; i <= segments; i++) {
-        const t = i / segments;
-        // Ease out from center
-        const eased = 1 - Math.pow(1 - t, 2);
-        const x = tx * eased;
-        const z = tz * eased;
-        // Slight arc upward
-        const y = 0.25 + Math.sin(t * Math.PI) * 0.6;
-        // Hand-drawn wobble
-        const wobble = Math.sin(t * 17) * 0.04 + Math.cos(t * 23) * 0.03;
-        points.push(
-          new THREE.Vector3(
-            x + wobble * (Math.abs(tz) + 0.1),
-            y,
-            z + wobble * (Math.abs(tx) + 0.1)
-          )
-        );
-      }
+    [2.2, 3.4, 5.6].forEach((radius) => {
+      const ringGeo = new THREE.TorusGeometry(radius, 0.04, 8, 48);
+      ringGeo.rotateX(Math.PI / 2);
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.y = -0.85;
+      ring.receiveShadow = true;
+      ring.name = "stepping-stone-ring";
+      this.scene.add(ring);
+    });
 
-      const curveGeo = new THREE.BufferGeometry().setFromPoints(points);
-      const curveLine = new THREE.Line(
-        curveGeo,
-        new THREE.LineBasicMaterial({
-          color: 0xc4b5a0,
-          transparent: true,
-          opacity: 0.3,
-        })
-      );
-      curveLine.name = "connect-line";
-      this.scene.add(curveLine);
+    // Small scattered stones between islands
+    const stoneGeo = new THREE.SphereGeometry(0.08, 5, 4);
+    const stonePositions = [
+      [1.8, 1.4], [-1.5, 1.6], [1.3, -1.7], [-1.7, -1.3],
+      [0.4, 3.5], [-0.3, -3.2], [3.2, -0.2], [-3.1, 0.3],
+    ];
+
+    stonePositions.forEach(([sx, sz]) => {
+      const stoneMat = new THREE.MeshStandardMaterial({
+        color: 0xc8d5cc,
+        roughness: 0.65,
+        transparent: true,
+        opacity: 0.25,
+      });
+      const stone = new THREE.Mesh(stoneGeo, stoneMat);
+      stone.position.set(sx, -0.95, sz);
+      stone.scale.set(1, 0.3, 1);
+      stone.receiveShadow = true;
+      stone.name = "stepping-stone";
+      this.scene.add(stone);
     });
   }
 
-  _createParticles() {
-    const THREE = this.THREE;
-    const particleCount = 200;
-    const positions = new Float32Array(particleCount * 3);
-    const sizes = new Float32Array(particleCount);
+  // ── Floating Clouds ──────────────────────────────────────
 
-    for (let i = 0; i < particleCount; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 16;
-      positions[i * 3 + 1] = 0.3 + Math.random() * 5;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 16;
-      sizes[i] = Math.random() * 3 + 1;
+  _createClouds() {
+    const THREE = this.THREE;
+    this.cloudGroups = [];
+
+    const cloudDefs = [
+      { x: 3.5, z: 2.0, y: 3.2, seed: 101 },
+      { x: -3.0, z: 2.5, y: 3.8, seed: 202 },
+      { x: 2.0, z: -3.2, y: 2.8, seed: 303 },
+      { x: -2.8, z: -2.8, y: 3.5, seed: 404 },
+      { x: 5.0, z: -0.5, y: 4.0, seed: 505 },
+      { x: -4.5, z: -1.0, y: 3.0, seed: 606 },
+      { x: 0.5, z: 4.0, y: 3.6, seed: 707 },
+      { x: -0.8, z: -4.2, y: 4.2, seed: 808 },
+    ];
+
+    cloudDefs.forEach((def) => {
+      const cloud = createCloudGroup(THREE, def.seed);
+      cloud.position.set(def.x, def.y, def.z);
+      cloud.userData = {
+        baseX: def.x,
+        baseZ: def.z,
+        baseY: def.y,
+        driftAngle: Math.random() * Math.PI * 2,
+        driftSpeed: 0.08 + Math.random() * 0.15,
+        driftRadius: 0.6 + Math.random() * 1.5,
+        swayPhase: Math.random() * Math.PI * 2,
+        swaySpeed: 0.3 + Math.random() * 0.4,
+      };
+      cloud.name = "cloud";
+      this.scene.add(cloud);
+      this.cloudGroups.push(cloud);
+    });
+  }
+
+  _animateClouds(time) {
+    this.cloudGroups.forEach((cloud) => {
+      const ud = cloud.userData;
+      cloud.position.x =
+        ud.baseX + Math.cos(time * ud.driftSpeed + ud.swayPhase) * ud.driftRadius;
+      cloud.position.z =
+        ud.baseZ + Math.sin(time * ud.driftSpeed * 0.8 + ud.swayPhase) * ud.driftRadius * 0.8;
+      cloud.position.y =
+        ud.baseY + Math.sin(time * ud.swaySpeed + ud.swayPhase) * 0.3;
+    });
+  }
+
+  // ── Firefly Particles ────────────────────────────────────
+
+  _createFireflies() {
+    const THREE = this.THREE;
+    const count = 150;
+    const positions = new Float32Array(count * 3);
+
+    this._fireflyParams = [];
+    for (let i = 0; i < count; i++) {
+      const bx = (Math.random() - 0.5) * 12;
+      const bz = (Math.random() - 0.5) * 12;
+      const by = 0.3 + Math.random() * 4.5;
+      positions[i * 3] = bx;
+      positions[i * 3 + 1] = by;
+      positions[i * 3 + 2] = bz;
+
+      this._fireflyParams.push({
+        baseX: bx,
+        baseZ: bz,
+        baseY: by,
+        ax: 0.4 + Math.random() * 1.8,
+        az: 0.4 + Math.random() * 1.8,
+        ay: 0.15 + Math.random() * 0.4,
+        px: Math.random() * Math.PI * 2,
+        pz: Math.random() * Math.PI * 2,
+        py: Math.random() * Math.PI * 2,
+        speed: 0.25 + Math.random() * 0.7,
+        twinkle: Math.random() * Math.PI * 2,
+        twinkleSpeed: 1.5 + Math.random() * 3,
+      });
     }
 
-    const particleGeo = new THREE.BufferGeometry();
-    particleGeo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(positions, 3)
-    );
-    particleGeo.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
-    // Use small circle sprites for dust motes
-    const spriteCanvas = document.createElement("canvas");
-    spriteCanvas.width = 32;
-    spriteCanvas.height = 32;
-    const ctx = spriteCanvas.getContext("2d");
+    // Radial glow sprite
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d");
     const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradient.addColorStop(0, "rgba(200,180,150,0.5)");
-    gradient.addColorStop(0.5, "rgba(200,180,150,0.15)");
-    gradient.addColorStop(1, "rgba(200,180,150,0)");
+    gradient.addColorStop(0, "rgba(255, 230, 120, 0.95)");
+    gradient.addColorStop(0.15, "rgba(255, 210, 60, 0.75)");
+    gradient.addColorStop(0.4, "rgba(255, 180, 30, 0.25)");
+    gradient.addColorStop(0.7, "rgba(255, 150, 20, 0.05)");
+    gradient.addColorStop(1, "rgba(255, 120, 0, 0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 32, 32);
 
-    const spriteTex = new THREE.CanvasTexture(spriteCanvas);
-    const particleMat = new THREE.PointsMaterial({
-      map: spriteTex,
-      color: 0xd4c5b0,
-      size: 0.25,
-      blending: THREE.NormalBlending,
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.PointsMaterial({
+      map: tex,
+      color: 0xffd700,
+      size: 0.4,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.7,
     });
 
-    this.particles = new THREE.Points(particleGeo, particleMat);
-    this.particles.name = "dust-particles";
-    this.scene.add(this.particles);
+    this.fireflies = new THREE.Points(geo, mat);
+    this.fireflies.name = "fireflies";
+    this.scene.add(this.fireflies);
   }
 
-  _createCompassRose() {
+  _animateFireflies(time) {
+    if (!this.fireflies) return;
+    const pos = this.fireflies.geometry.attributes.position.array;
+
+    for (let i = 0; i < this._fireflyParams.length; i++) {
+      const p = this._fireflyParams[i];
+      pos[i * 3] = p.baseX + Math.sin(time * p.speed + p.px) * p.ax;
+      pos[i * 3 + 1] = p.baseY + Math.sin(time * p.speed * 1.3 + p.py) * p.ay;
+      pos[i * 3 + 2] = p.baseZ + Math.cos(time * p.speed * 0.9 + p.pz) * p.az;
+    }
+    this.fireflies.geometry.attributes.position.needsUpdate = true;
+
+    // Vary overall opacity for subtle twinkling
+    const twinkle = 0.55 + Math.sin(time * 0.8) * 0.15;
+    this.fireflies.material.opacity = twinkle;
+  }
+
+  // ── Central Great Tree ───────────────────────────────────
+
+  _createCentralTree() {
     const THREE = this.THREE;
-
-    // Simple compass rose at center
     const group = new THREE.Group();
-    group.position.set(0, 0.18, 0);
+    group.position.set(0, 0.3, 0);
 
-    // Center dot
-    const dotGeo = new THREE.SphereGeometry(0.12, 8, 8);
-    const dotMat = new THREE.MeshToonMaterial({ color: 0x8b7355 });
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    group.add(dot);
-
-    // N indicator
-    const nCanvas = document.createElement("canvas");
-    nCanvas.width = 64;
-    nCanvas.height = 64;
-    const ctx = nCanvas.getContext("2d");
-    ctx.fillStyle = "#8b7355";
-    ctx.font = "bold 28px serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("N", 32, 32);
-
-    const nTex = new THREE.CanvasTexture(nCanvas);
-    nTex.minFilter = THREE.LinearFilter;
-    const nMat = new THREE.SpriteMaterial({
-      map: nTex,
-      transparent: true,
-      depthTest: false,
+    // Trunk
+    const trunkGeo = new THREE.CylinderGeometry(0.06, 0.16, 1.2, 10);
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: 0x7a5c3a,
+      roughness: 0.6,
     });
-    const nSprite = new THREE.Sprite(nMat);
-    nSprite.position.set(0, 0.35, 0);
-    nSprite.scale.set(0.6, 0.6, 1);
-    group.add(nSprite);
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+    trunk.position.y = 0.6;
+    trunk.castShadow = true;
+    trunk.receiveShadow = true;
+    group.add(trunk);
 
-    group.name = "compass";
+    // Root tendrils spreading outward
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2;
+      const rootGeo = new THREE.CylinderGeometry(0.02, 0.05, 0.5, 6);
+      const root = new THREE.Mesh(rootGeo, trunkMat);
+      root.position.set(
+        Math.cos(angle) * 0.22,
+        0.15,
+        Math.sin(angle) * 0.22
+      );
+      root.rotation.z = Math.cos(angle) * 0.8;
+      root.rotation.x = Math.sin(angle) * 0.8;
+      root.castShadow = true;
+      group.add(root);
+    }
+
+    // Foliage layers (canopy)
+    const foliageDefs = [
+      { r: 0.55, h: 0.45, y: 1.0 },
+      { r: 0.42, h: 0.4, y: 1.3 },
+      { r: 0.3, h: 0.35, y: 1.55 },
+      { r: 0.18, h: 0.3, y: 1.75 },
+    ];
+
+    foliageDefs.forEach((def, i) => {
+      const coneGeo = new THREE.ConeGeometry(def.r, def.h, 10, 2);
+      const hue = 0.2 + i * 0.03;
+      const color = new THREE.Color().setHSL(hue, 0.55, 0.3 + i * 0.06);
+      const coneMat = new THREE.MeshStandardMaterial({
+        color: color,
+        roughness: 0.5,
+      });
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.y = def.y;
+      cone.castShadow = true;
+      cone.receiveShadow = true;
+      group.add(cone);
+    });
+
+    // Orbiting glow particles around canopy
+    const orbitCount = 25;
+    const orbitPositions = new Float32Array(orbitCount * 3);
+    this._treeOrbitData = [];
+    for (let i = 0; i < orbitCount; i++) {
+      const angle = (i / orbitCount) * Math.PI * 2;
+      const radius = 0.5 + Math.random() * 0.25;
+      const height = 0.9 + Math.random() * 0.9;
+      orbitPositions[i * 3] = Math.cos(angle) * radius;
+      orbitPositions[i * 3 + 1] = height;
+      orbitPositions[i * 3 + 2] = Math.sin(angle) * radius;
+      this._treeOrbitData.push({
+        angle: angle,
+        radius: radius,
+        height: height,
+        speed: 0.3 + Math.random() * 0.6,
+        yOsc: Math.random() * Math.PI * 2,
+      });
+    }
+
+    const orbitGeo = new THREE.BufferGeometry();
+    orbitGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(orbitPositions, 3)
+    );
+
+    // Mini glow sprite for orbiting particles
+    const dotCanvas = document.createElement("canvas");
+    dotCanvas.width = 16;
+    dotCanvas.height = 16;
+    const dctx = dotCanvas.getContext("2d");
+    const dgrad = dctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    dgrad.addColorStop(0, "rgba(255, 240, 180, 0.9)");
+    dgrad.addColorStop(0.5, "rgba(255, 200, 80, 0.3)");
+    dgrad.addColorStop(1, "rgba(255, 150, 30, 0)");
+    dctx.fillStyle = dgrad;
+    dctx.fillRect(0, 0, 16, 16);
+
+    const orbitTex = new THREE.CanvasTexture(dotCanvas);
+    const orbitMat = new THREE.PointsMaterial({
+      map: orbitTex,
+      color: 0xffe8a0,
+      size: 0.15,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.65,
+    });
+
+    this.treeOrbitParticles = new THREE.Points(orbitGeo, orbitMat);
+    group.add(this.treeOrbitParticles);
+
+    group.name = "central-tree";
+    this.centralTreeGroup = group;
     this.scene.add(group);
   }
+
+  _animateCentralTree(time) {
+    if (!this.centralTreeGroup) return;
+
+    // Gentle sway
+    this.centralTreeGroup.rotation.z =
+      Math.sin(time * 0.35) * 0.015;
+    this.centralTreeGroup.rotation.x =
+      Math.cos(time * 0.42) * 0.01;
+
+    // Orbit particles
+    if (this.treeOrbitParticles && this._treeOrbitData) {
+      const pos = this.treeOrbitParticles.geometry.attributes.position.array;
+      for (let i = 0; i < this._treeOrbitData.length; i++) {
+        const d = this._treeOrbitData[i];
+        const a = d.angle + time * d.speed;
+        pos[i * 3] = Math.cos(a) * d.radius;
+        pos[i * 3 + 1] = d.height + Math.sin(time * 1.2 + d.yOsc) * 0.12;
+        pos[i * 3 + 2] = Math.sin(a) * d.radius;
+      }
+      this.treeOrbitParticles.geometry.attributes.position.needsUpdate = true;
+    }
+  }
+
+  // ── Interaction ──────────────────────────────────────────
 
   _setupInteraction() {
     const canvas = this.renderer.domElement;
@@ -936,7 +1231,7 @@ class LifeMapScene {
     for (const group of this.areaGroups) {
       if (
         obj.name === `island-${group.userData.areaId}` ||
-        obj.name?.startsWith(`sub-${group.userData.areaId}`)
+        (obj.name && obj.name.startsWith(`sub-${group.userData.areaId}`))
       ) {
         areaPath = group.userData.areaPath;
         break;
@@ -954,14 +1249,11 @@ class LifeMapScene {
     }
 
     if (areaPath && this.app) {
-      // Open the folder in Obsidian's file explorer
       const fileExplorer =
         this.app.internalPlugins?.getPluginById("file-explorer");
       if (fileExplorer?.enabled) {
-        // Reveal in file explorer
         const abstractFile = this.app.vault.getAbstractFileByPath(areaPath);
         if (abstractFile) {
-          // Use the file explorer's reveal method
           const leaves = this.app.workspace.getLeavesOfType("file-explorer");
           if (leaves.length > 0) {
             // @ts-ignore
@@ -975,6 +1267,8 @@ class LifeMapScene {
     }
   }
 
+  // ── Animation Loop ───────────────────────────────────────
+
   _animate() {
     this.animationId = requestAnimationFrame(() => this._animate());
 
@@ -984,31 +1278,35 @@ class LifeMapScene {
     // Update controls
     this.controls.update(Math.min(delta, 0.1));
 
-    // Bob area islands
+    // Animate water waves
+    this._animateWater(time);
+
+    // Bob + gentle rotation for area islands
     this.areaGroups.forEach((group) => {
       const ud = group.userData;
       group.position.y =
         ud.baseY + Math.sin(time * ud.bobSpeed + ud.bobPhase) * ud.bobAmp;
+      group.rotation.y +=
+        Math.sin(time * ud.rotSpeed + ud.rotPhase) * 0.0003;
     });
 
-    // Bob extra nodes
+    // Bob + rotation for extra nodes
     this.extraGroups.forEach((group) => {
       const ud = group.userData;
       group.position.y =
         ud.baseY + Math.sin(time * ud.bobSpeed + ud.bobPhase) * ud.bobAmp;
+      group.rotation.y +=
+        Math.sin(time * ud.rotSpeed + ud.rotPhase) * 0.0002;
     });
 
-    // Animate particles
-    if (this.particles) {
-      const pos = this.particles.geometry.attributes.position.array;
-      for (let i = 0; i < pos.length; i += 3) {
-        pos[i + 1] += Math.sin(time * 1.3 + i) * 0.002;
-        // Wrap particles that float too high
-        if (pos[i + 1] > 5.5) pos[i + 1] = 0.3;
-        if (pos[i + 1] < 0.1) pos[i + 1] = 5.3;
-      }
-      this.particles.geometry.attributes.position.needsUpdate = true;
-    }
+    // Animate clouds
+    this._animateClouds(time);
+
+    // Animate fireflies
+    this._animateFireflies(time);
+
+    // Animate central tree
+    this._animateCentralTree(time);
 
     // Hover detection
     this.raycaster.setFromCamera(this.mouse, this.camera);
@@ -1018,7 +1316,6 @@ class LifeMapScene {
       if (this.hoveredObject !== obj) {
         this._unhover();
         this.hoveredObject = obj;
-        obj.material?.emissive?.set(obj.material.emissive || 0x000000);
         if (obj.material.emissive) {
           obj.material._origEmissive = obj.material.emissive.getHex();
         }
@@ -1038,18 +1335,27 @@ class LifeMapScene {
     }
   }
 
+  // ── Cleanup ──────────────────────────────────────────────
+
   dispose() {
     if (this.animationId) cancelAnimationFrame(this.animationId);
     this.controls?.dispose();
     window.removeEventListener("resize", this._onResize);
-    this.renderer?.dispose();
     this.scene?.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose();
-        obj.material.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach((m) => {
+            if (m.map) m.map.dispose();
+            m.dispose();
+          });
+        } else {
+          if (obj.material.map) obj.material.map.dispose();
+          obj.material.dispose();
+        }
       }
     });
+    this.renderer?.dispose();
     if (this.renderer?.domElement) {
       this.renderer.domElement.remove();
     }
@@ -1105,7 +1411,7 @@ class AtlasHomepageView extends ItemView {
 
       // Info overlay
       const infoEl = container.createDiv("atlas-homepage-info");
-      infoEl.setText("拖拽旋转 · 滚轮缩放 · 点击岛屿探索你的知识地图");
+      infoEl.setText("拖拽旋转 · 滚轮缩放 · 点击浮岛探索你的知识海洋");
 
       // Stats bar
       this._createStatsBar(container);
@@ -1120,7 +1426,6 @@ class AtlasHomepageView extends ItemView {
   async _createStatsBar(container) {
     const statsEl = container.createDiv("atlas-homepage-stats");
 
-    // Count notes in each area (async)
     try {
       const counts = {};
       for (const area of AREAS) {
@@ -1132,8 +1437,8 @@ class AtlasHomepageView extends ItemView {
 
       const total = Object.values(counts).reduce((a, b) => a + b, 0);
       const statItems = [
-        { label: "笔记", value: total.toString(), color: "#8b7355" },
-        { label: "领域", value: AREAS.length.toString(), color: "#c4b5a0" },
+        { label: "笔记", value: total.toString(), color: "#5a8590" },
+        { label: "领域", value: AREAS.length.toString(), color: "#8ec8d0" },
         ...AREAS.map((a) => ({
           label: a.ename,
           value: (counts[a.id] || 0).toString(),
@@ -1166,7 +1471,6 @@ class AtlasHomepageView extends ItemView {
 
 class AtlasHomepagePlugin extends Plugin {
   async onload() {
-    const self = this;
     // Register custom view
     this.registerView(
       VIEW_TYPE,
@@ -1195,7 +1499,6 @@ class AtlasHomepagePlugin extends Plugin {
 
     let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
     if (!leaf) {
-      // Open in the center/main area
       leaf = workspace.getLeaf(true);
       await leaf.setViewState({
         type: VIEW_TYPE,

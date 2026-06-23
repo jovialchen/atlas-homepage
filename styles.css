@@ -1,6 +1,6 @@
-/* Atlas Homepage — Hand-drawn 3D Life Map
+/* Atlas Homepage — Floating Island Ocean
  * A Three.js powered homepage for the Atlas vault.
- * Sketch-style, paper-crafted aesthetic.
+ * Ghibli-inspired floating island ocean aesthetic.
  */
 
 /* ── View Container ── */
@@ -9,7 +9,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #f5f0e8;
+  background: #e8f4f8;
   font-family: var(--font-text, -apple-system, sans-serif);
 }
 
@@ -25,7 +25,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #f5f0e8;
+  background: #e8f4f8;
   z-index: 10;
   transition: opacity 0.6s ease;
 }
@@ -38,25 +38,24 @@
 .atlas-homepage-loading .loading-sketch {
   width: 60px;
   height: 60px;
-  border: 3px solid #c4b5a0;
-  border-top-color: #8b7355;
+  border: 3px solid #7eb8c9;
+  border-top-color: #4a8fa0;
   border-radius: 50%;
-  animation: sketch-spin 1.2s linear infinite;
-  /* Hand-drawn irregularity via box-shadow */
+  animation: ocean-spin 1.2s linear infinite;
   box-shadow:
-    2px 0 0 -1px #d4c5b0,
-    -2px 0 0 -1px #d4c5b0,
-    0 2px 0 -1px #d4c5b0,
-    0 -2px 0 -1px #d4c5b0;
+    2px 0 0 -1px #a0d4e0,
+    -2px 0 0 -1px #a0d4e0,
+    0 2px 0 -1px #a0d4e0,
+    0 -2px 0 -1px #a0d4e0;
 }
 
-@keyframes sketch-spin {
+@keyframes ocean-spin {
   to { transform: rotate(360deg); }
 }
 
 .atlas-homepage-loading .loading-text {
   margin-top: 16px;
-  color: #8b7355;
+  color: #5a8590;
   font-size: 14px;
   font-style: italic;
   letter-spacing: 0.5px;
@@ -67,7 +66,7 @@
   position: absolute;
   bottom: 20px;
   left: 24px;
-  color: #8b7355;
+  color: #5a8590;
   font-size: 11px;
   opacity: 0.7;
   pointer-events: none;
@@ -79,16 +78,15 @@
 .atlas-homepage-tooltip {
   position: absolute;
   padding: 6px 14px;
-  background: rgba(255, 252, 245, 0.95);
-  border: 2px solid #c4b5a0;
+  background: rgba(245, 252, 255, 0.95);
+  border: 2px solid #8ec8d0;
   border-radius: 4px;
-  color: #5c4a3a;
+  color: #3a5058;
   font-size: 13px;
   pointer-events: none;
   z-index: 20;
   transform: translate(-50%, -130%);
-  box-shadow: 2px 3px 0 rgba(139, 115, 85, 0.15);
-  /* Hand-drawn border effect */
+  box-shadow: 2px 3px 0 rgba(74, 143, 160, 0.15);
   border-image: none;
   transition: opacity 0.15s ease;
 }
@@ -103,7 +101,7 @@
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 6px solid #c4b5a0;
+  border-top: 6px solid #8ec8d0;
 }
 
 /* ── Quick Stats Bar (top-right) ── */
@@ -114,7 +112,7 @@
   display: flex;
   gap: 16px;
   font-size: 11px;
-  color: #a09080;
+  color: #6a8890;
   pointer-events: none;
 }
 
