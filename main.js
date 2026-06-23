@@ -1,13 +1,15 @@
 /**
- * Atlas Homepage — Floating Island Ocean
+ * Atlas Homepage — 枯山水 · Zen Garden
  * ==========================================
  * A custom Obsidian homepage plugin for the Atlas vault.
- * Renders a Three.js 3D scene with a Ghibli-inspired floating
- * island ocean aesthetic — organic islands, animated water,
- * drifting clouds, and glowing fireflies.
+ * Renders a karesansui (dry landscape) zen garden using
+ * pure Canvas 2D — stones, raked sand ripples, moss,
+ * and subtle ink-wash animation.
  *
  * Vault: Atlas (PARA + Learning/Logs/Inbox)
- * Style: Floating islands, ocean water, warm sky, organic terrain
+ * Style: Japanese zen garden, ink-wash, wabi-sabi
+ *
+ * Zero external dependencies — no Three.js CDN needed.
  */
 
 "use strict";
@@ -17,35 +19,7 @@ var Plugin = obsidian.Plugin;
 var ItemView = obsidian.ItemView;
 
 // ═══════════════════════════════════════════════════════════
-// THREE.JS CDN LOADER
-// ═══════════════════════════════════════════════════════════
-
-const THREE_CDN =
-  "https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.min.js";
-
-let THREELoaded = false;
-
-async function ensureThreeJS() {
-  if (THREELoaded) return window.THREE;
-  if (window.THREE) {
-    THREELoaded = true;
-    return window.THREE;
-  }
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = THREE_CDN;
-    script.onload = () => {
-      THREELoaded = true;
-      resolve(window.THREE);
-    };
-    script.onerror = () =>
-      reject(new Error("Failed to load Three.js from CDN"));
-    document.head.appendChild(script);
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
-// AREA DEFINITIONS — Mirrors the Atlas vault structure
+// AREA DEFINITIONS
 // ═══════════════════════════════════════════════════════════
 
 const AREAS = [
@@ -55,10 +29,11 @@ const AREAS = [
     ename: "Fun",
     icon: "🎨",
     path: "Areas/Fun",
-    color: 0xff6b6b,
-    subColor: 0xffe0e0,
+    color: "#c47a6b",
+    mossColor: "#9bb87f",
     subfolders: ["Eureka", "Experience", "Movies&TV Shows", "Serendipities"],
-    angle: -Math.PI / 2, // top
+    // Position in design space (1000×700)
+    cx: 500, cy: 185, size: 48,
   },
   {
     id: "Health",
@@ -66,10 +41,10 @@ const AREAS = [
     ename: "Health",
     icon: "💚",
     path: "Areas/Health",
-    color: 0x51cf66,
-    subColor: 0xd8f5dc,
+    color: "#8a9b7a",
+    mossColor: "#7da864",
     subfolders: ["Books", "Eureka", "Serendipities"],
-    angle: (-Math.PI / 2) + (2 * Math.PI) / 5, // top-right
+    cx: 690, cy: 295, size: 44,
   },
   {
     id: "Work",
@@ -77,10 +52,10 @@ const AREAS = [
     ename: "Work",
     icon: "💼",
     path: "Areas/Work",
-    color: 0x9775fa,
-    subColor: 0xe8ddff,
+    color: "#8b82a0",
+    mossColor: "#8aaa76",
     subfolders: ["Language", "SideHustle", "SoftSkill", "Technical"],
-    angle: (-Math.PI / 2) + (4 * Math.PI) / 5, // top-left
+    cx: 310, cy: 295, size: 50,
   },
   {
     id: "Love",
@@ -88,10 +63,10 @@ const AREAS = [
     ename: "Love & Family",
     icon: "💕",
     path: "Areas/Love",
-    color: 0xf783ac,
-    subColor: 0xffe0eb,
+    color: "#b88a94",
+    mossColor: "#94b87a",
     subfolders: ["Experience", "Workshops"],
-    angle: (-Math.PI / 2) + (6 * Math.PI) / 5, // bottom-left
+    cx: 340, cy: 490, size: 42,
   },
   {
     id: "People",
@@ -99,10 +74,10 @@ const AREAS = [
     ename: "People",
     icon: "👥",
     path: "Areas/People",
-    color: 0x74c0fc,
-    subColor: 0xd8eeff,
+    color: "#8a9aaa",
+    mossColor: "#82a878",
     subfolders: [],
-    angle: (-Math.PI / 2) + (8 * Math.PI) / 5, // bottom-right
+    cx: 660, cy: 490, size: 40,
   },
 ];
 
@@ -112,118 +87,43 @@ const EXTRA_NODES = [
     name: "项目",
     icon: "📋",
     path: "Projects",
-    color: 0xffa94d,
-    angle: 0,
-    distance: 6.8,
+    color: "#b8956e",
+    cx: 780, cy: 160, size: 28,
   },
   {
     id: "Learning",
     name: "学习",
     icon: "📚",
     path: "Learning",
-    color: 0x20c997,
-    angle: Math.PI / 3,
-    distance: 6.8,
+    color: "#7a9b8c",
+    cx: 845, cy: 360, size: 26,
   },
   {
     id: "Logs",
     name: "日志",
     icon: "📝",
     path: "Logs",
-    color: 0x868e96,
-    angle: (2 * Math.PI) / 3,
-    distance: 6.8,
+    color: "#8b8b8b",
+    cx: 740, cy: 560, size: 24,
   },
   {
     id: "Inbox",
     name: "收件箱",
     icon: "📥",
     path: "Inbox",
-    color: 0xda77f2,
-    angle: Math.PI,
-    distance: 6.8,
+    color: "#a08aaa",
+    cx: 215, cy: 380, size: 26,
   },
 ];
 
-const AREA_RING_RADIUS = 4.5;
+// Design-space dimensions (scaled to fit actual canvas)
+const DESIGN_W = 1000;
+const DESIGN_H = 700;
 
 // ═══════════════════════════════════════════════════════════
-// TERRAIN & DECORATION HELPERS
+// SEEDED RANDOM (for deterministic stone shapes)
 // ═══════════════════════════════════════════════════════════
 
-/**
- * Displace cylinder vertices radially with layered sine noise
- * to create organic island coastlines.
- */
-function displaceIslandVertices(geometry, seed) {
-  const pos = geometry.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const angle = Math.atan2(z, x);
-    const radius = Math.sqrt(x * x + z * z);
-    if (radius < 0.02) continue; // skip center vertices
-
-    const n =
-      Math.sin(angle * 5.3 + seed) * 0.09 +
-      Math.sin(angle * 3.1 + seed * 1.7) * 0.06 +
-      Math.sin(angle * 7.7 + seed * 0.4) * 0.04 +
-      Math.cos(angle * 2.3 + seed * 2.1) * 0.03;
-    const newR = Math.max(0.12, radius + n);
-    pos.setXYZ(i, Math.cos(angle) * newR, y, Math.sin(angle) * newR);
-  }
-  geometry.computeVertexNormals();
-}
-
-/**
- * Create a simple procedural tree: cylinder trunk + stacked cone foliage.
- * Returns a THREE.Group.
- */
-function createTree(THREE, height, foliageRadius, seed) {
-  const group = new THREE.Group();
-  const rand = mulberry32(seed);
-
-  // Trunk
-  const trunkH = height * 0.45;
-  const trunkGeo = new THREE.CylinderGeometry(0.03, 0.06, trunkH, 6);
-  const trunkMat = new THREE.MeshStandardMaterial({
-    color: 0x8b6914,
-    roughness: 0.7,
-  });
-  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-  trunk.position.y = trunkH / 2;
-  trunk.castShadow = true;
-  trunk.receiveShadow = true;
-  group.add(trunk);
-
-  // Foliage layers (2-3 cones stacked)
-  const layers = 2 + Math.floor(rand() * 2);
-  for (let i = 0; i < layers; i++) {
-    const r = foliageRadius * (1 - i * 0.28);
-    const coneH = height * 0.38;
-    const coneGeo = new THREE.ConeGeometry(r, coneH, 8, 2);
-    const hue = 0.18 + rand() * 0.14; // green range
-    const sat = 0.5 + rand() * 0.3;
-    const light = 0.28 + i * 0.08 + rand() * 0.06;
-    const color = new THREE.Color().setHSL(hue, sat, light);
-    const coneMat = new THREE.MeshStandardMaterial({
-      color: color,
-      roughness: 0.55,
-    });
-    const cone = new THREE.Mesh(coneGeo, coneMat);
-    cone.position.y = trunkH + i * coneH * 0.65;
-    cone.castShadow = true;
-    cone.receiveShadow = true;
-    group.add(cone);
-  }
-
-  return group;
-}
-
-/**
- * Simple seeded PRNG for tree variation (mulberry32).
- */
 function mulberry32(a) {
   return function () {
     a |= 0;
@@ -234,1034 +134,634 @@ function mulberry32(a) {
   };
 }
 
-/**
- * Create a cloud group from overlapping spheres.
- */
-function createCloudGroup(THREE, seed) {
-  const group = new THREE.Group();
-  const rand = mulberry32(seed);
-  const count = 5 + Math.floor(rand() * 6);
-  const cloudMat = new THREE.MeshStandardMaterial({
-    color: 0xfffef8,
-    roughness: 0.9,
-    transparent: true,
-    opacity: 0.78,
-  });
-
-  for (let i = 0; i < count; i++) {
-    const r = 0.18 + rand() * 0.45;
-    const geo = new THREE.SphereGeometry(r, 8, 6);
-    const blob = new THREE.Mesh(geo, cloudMat);
-    blob.position.set(
-      (rand() - 0.5) * 1.4,
-      (rand() - 0.5) * 0.35,
-      (rand() - 0.5) * 1.2
-    );
-    blob.castShadow = false;
-    blob.receiveShadow = false;
-    group.add(blob);
-  }
-
-  return group;
-}
-
 // ═══════════════════════════════════════════════════════════
-// SPRITE LABEL HELPER
+// ZEN GARDEN CANVAS SCENE
 // ═══════════════════════════════════════════════════════════
 
-function createLabelSprite(text, icon, colorHex) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d");
-
-  // Soft pill background for readability (manual rounded rect for compat)
-  const pillW = 280;
-  const pillH = 110;
-  const pillX = (512 - pillW) / 2;
-  const pillY = (256 - pillH) / 2 - 10;
-  const pillR = 24;
-  ctx.fillStyle = "rgba(255, 254, 248, 0.72)";
-  ctx.beginPath();
-  ctx.moveTo(pillX + pillR, pillY);
-  ctx.lineTo(pillX + pillW - pillR, pillY);
-  ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + pillR, pillR);
-  ctx.lineTo(pillX + pillW, pillY + pillH - pillR);
-  ctx.arcTo(pillX + pillW, pillY + pillH, pillX + pillW - pillR, pillY + pillH, pillR);
-  ctx.lineTo(pillX + pillR, pillY + pillH);
-  ctx.arcTo(pillX, pillY + pillH, pillX, pillY + pillH - pillR, pillR);
-  ctx.lineTo(pillX, pillY + pillR);
-  ctx.arcTo(pillX, pillY, pillX + pillR, pillY, pillR);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = "rgba(180, 170, 150, 0.35)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  // Icon
-  ctx.font = "48px serif";
-  ctx.textAlign = "center";
-  ctx.fillText(icon, 256, pillY + 48);
-
-  // Text
-  ctx.font = "bold 28px Georgia, 'Noto Serif SC', 'Segoe UI', serif";
-  ctx.fillStyle = "#4a3728";
-  ctx.textAlign = "center";
-  ctx.fillText(text, 256, pillY + 80);
-
-  // Clean underline
-  const textWidth = ctx.measureText(text).width;
-  const underlineY = pillY + 92;
-  ctx.strokeStyle = colorHex || "#8ec8d0";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(256 - textWidth / 2, underlineY);
-  ctx.lineTo(256 + textWidth / 2, underlineY);
-  ctx.stroke();
-
-  return canvas;
-}
-
-// ═══════════════════════════════════════════════════════════
-// CUSTOM ORBIT CONTROLS (smooth cinematic feel)
-// ═══════════════════════════════════════════════════════════
-
-class SketchOrbitControls {
-  constructor(camera, domElement) {
-    this.camera = camera;
-    this.domElement = domElement;
-    this.target = { x: 0, y: 0.3, z: 0 };
-    this.spherical = { radius: 11, phi: Math.PI / 3.2, theta: -Math.PI / 2 };
-    this.autoRotate = true;
-    this.autoRotateSpeed = 0.15;
-    this.enableDamping = true;
-    this.dampingFactor = 0.08;
-    this.minDistance = 6;
-    this.maxDistance = 20;
-    this.maxPhi = Math.PI / 2 - 0.1;
-    this.minPhi = 0.2;
-
-    this._isDragging = false;
-    this._prevMouse = { x: 0, y: 0 };
-    this._velocity = { theta: 0, phi: 0 };
-
-    this._onMouseDown = this._onMouseDown.bind(this);
-    this._onMouseMove = this._onMouseMove.bind(this);
-    this._onMouseUp = this._onMouseUp.bind(this);
-    this._onWheel = this._onWheel.bind(this);
-    this._onTouchStart = this._onTouchStart.bind(this);
-    this._onTouchMove = this._onTouchMove.bind(this);
-    this._onTouchEnd = this._onTouchEnd.bind(this);
-
-    domElement.addEventListener("mousedown", this._onMouseDown);
-    domElement.addEventListener("mousemove", this._onMouseMove);
-    domElement.addEventListener("mouseup", this._onMouseUp);
-    domElement.addEventListener("wheel", this._onWheel, { passive: true });
-    domElement.addEventListener("touchstart", this._onTouchStart, {
-      passive: false,
-    });
-    domElement.addEventListener("touchmove", this._onTouchMove, {
-      passive: false,
-    });
-    domElement.addEventListener("touchend", this._onTouchEnd);
-  }
-
-  _onMouseDown(e) {
-    this._isDragging = true;
-    this._prevMouse.x = e.clientX;
-    this._prevMouse.y = e.clientY;
-    this._velocity.theta = 0;
-    this._velocity.phi = 0;
-  }
-
-  _onMouseMove(e) {
-    if (!this._isDragging) return;
-    const dx = e.clientX - this._prevMouse.x;
-    const dy = e.clientY - this._prevMouse.y;
-    this.spherical.theta -= dx * 0.005;
-    this.spherical.phi -= dy * 0.005;
-    this.spherical.phi = Math.max(
-      this.minPhi,
-      Math.min(this.maxPhi, this.spherical.phi)
-    );
-    this._velocity.theta = -dx * 0.005;
-    this._velocity.phi = -dy * 0.005;
-    this._prevMouse.x = e.clientX;
-    this._prevMouse.y = e.clientY;
-    this.autoRotate = false;
-    setTimeout(() => { this.autoRotate = true; }, 3000);
-  }
-
-  _onMouseUp() {
-    this._isDragging = false;
-  }
-
-  _onWheel(e) {
-    this.spherical.radius += e.deltaY * 0.01;
-    this.spherical.radius = Math.max(
-      this.minDistance,
-      Math.min(this.maxDistance, this.spherical.radius)
-    );
-  }
-
-  _onTouchStart(e) {
-    if (e.touches.length === 1) {
-      e.preventDefault();
-      this._isDragging = true;
-      this._prevMouse.x = e.touches[0].clientX;
-      this._prevMouse.y = e.touches[0].clientY;
-    }
-  }
-
-  _onTouchMove(e) {
-    if (!this._isDragging || e.touches.length !== 1) return;
-    e.preventDefault();
-    const dx = e.touches[0].clientX - this._prevMouse.x;
-    const dy = e.touches[0].clientY - this._prevMouse.y;
-    this.spherical.theta -= dx * 0.005;
-    this.spherical.phi -= dy * 0.005;
-    this.spherical.phi = Math.max(
-      this.minPhi,
-      Math.min(this.maxPhi, this.spherical.phi)
-    );
-    this._prevMouse.x = e.touches[0].clientX;
-    this._prevMouse.y = e.touches[0].clientY;
-  }
-
-  _onTouchEnd() {
-    this._isDragging = false;
-  }
-
-  update(deltaTime) {
-    if (this.autoRotate && !this._isDragging) {
-      this.spherical.theta += this.autoRotateSpeed * deltaTime;
-    } else if (!this._isDragging) {
-      this.spherical.theta += this._velocity.theta;
-      this.spherical.phi += this._velocity.phi;
-      this._velocity.theta *= 1 - this.dampingFactor;
-      this._velocity.phi *= 1 - this.dampingFactor;
-      this.spherical.phi = Math.max(
-        this.minPhi,
-        Math.min(this.maxPhi, this.spherical.phi)
-      );
-    }
-
-    // Minimal wobble for subtle organic feel (vs old 0.003 sketchy wobble)
-    const wobble = this._isDragging
-      ? 0
-      : Math.sin(Date.now() * 0.0007) * 0.0005;
-    const wobble2 = this._isDragging
-      ? 0
-      : Math.cos(Date.now() * 0.0009) * 0.0005;
-
-    this.camera.position.x =
-      this.target.x +
-      this.spherical.radius *
-        Math.sin(this.spherical.phi + wobble) *
-        Math.cos(this.spherical.theta + wobble2);
-    this.camera.position.y =
-      this.target.y +
-      this.spherical.radius * Math.cos(this.spherical.phi + wobble);
-    this.camera.position.z =
-      this.target.z +
-      this.spherical.radius *
-        Math.sin(this.spherical.phi + wobble) *
-        Math.sin(this.spherical.theta + wobble2);
-    this.camera.lookAt(this.target.x, this.target.y, this.target.z);
-  }
-
-  dispose() {
-    this.domElement.removeEventListener("mousedown", this._onMouseDown);
-    this.domElement.removeEventListener("mousemove", this._onMouseMove);
-    this.domElement.removeEventListener("mouseup", this._onMouseUp);
-    this.domElement.removeEventListener("wheel", this._onWheel);
-    this.domElement.removeEventListener("touchstart", this._onTouchStart);
-    this.domElement.removeEventListener("touchmove", this._onTouchMove);
-    this.domElement.removeEventListener("touchend", this._onTouchEnd);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// 3D LIFE MAP SCENE — Floating Island Ocean
-// ═══════════════════════════════════════════════════════════
-
-class LifeMapScene {
-  constructor(container, THREE, app) {
-    this.THREE = THREE;
+class ZenGardenScene {
+  constructor(container, app) {
     this.app = app;
     this.container = container;
     this.animationId = null;
-    this.clock = new THREE.Clock();
-    this.hoveredObject = null;
-    this.clickableObjects = [];
+    this.hoveredStone = null;
+    this.scale = 1;
+    this.offsetX = 0;
+    this.offsetY = 0;
+
+    // Pre-generate stone shape points (deterministic)
+    this._stoneShapes = {};
+    this._buildAllStoneShapes();
+
+    // Ripple animation state
+    this._ripplePhase = 0;
+    this._breathingRipples = []; // expanding rings
 
     this._init();
   }
 
+  // ── Build irregular stone outlines ───────────────────────
+
+  _buildStoneShape(seed, size, irregularity) {
+    const rand = mulberry32(seed);
+    const points = [];
+    const vertexCount = 14 + Math.floor(rand() * 10);
+    for (let i = 0; i < vertexCount; i++) {
+      const angle = (i / vertexCount) * Math.PI * 2;
+      const r = size * (0.72 + rand() * 0.56 * irregularity);
+      // Flatten slightly on one axis for natural stone look
+      const squash = 0.75 + 0.25 * Math.abs(Math.cos(angle));
+      points.push({
+        x: Math.cos(angle) * r * squash,
+        y: Math.sin(angle) * r,
+      });
+    }
+    return points;
+  }
+
+  _buildAllStoneShapes() {
+    let seedBase = 1;
+    for (const area of AREAS) {
+      this._stoneShapes[area.id] = this._buildStoneShape(
+        seedBase++, area.size, 0.7
+      );
+      // Subfolder moss patches
+      this._stoneShapes[area.id + "_moss"] = area.subfolders.map((_, i) =>
+        this._buildStoneShape(seedBase++ * 100 + i, area.size * 0.18, 0.9)
+      );
+    }
+    for (const node of EXTRA_NODES) {
+      this._stoneShapes[node.id] = this._buildStoneShape(
+        seedBase++, node.size, 0.55
+      );
+    }
+  }
+
+  // ── Init ─────────────────────────────────────────────────
+
   _init() {
-    const THREE = this.THREE;
+    // Create canvas
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "zen-garden-canvas";
+    this.canvas.style.cssText =
+      "display:block;width:100%;height:100%;cursor:default;";
+    this.container.appendChild(this.canvas);
+    this.ctx = this.canvas.getContext("2d");
 
-    // --- Renderer ---
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(
-      this.container.clientWidth,
-      this.container.clientHeight
-    );
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor(0xb8d8e3); // pale sky blue
-    this.container.appendChild(this.renderer.domElement);
-
-    // --- Scene ---
-    this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0xe8f0f0, 12, 38);
-
-    // --- Camera ---
-    this.camera = new THREE.PerspectiveCamera(
-      50,
-      this.container.clientWidth / this.container.clientHeight,
-      0.5,
-      40
-    );
-    this.camera.position.set(0, 7, 11);
-
-    // --- Controls ---
-    this.controls = new SketchOrbitControls(
-      this.camera,
-      this.renderer.domElement
-    );
-
-    // --- Lighting ---
-    // Warm ambient base
-    const ambient = new THREE.AmbientLight(0xfff5e6, 0.45);
-    this.scene.add(ambient);
-
-    // Hemisphere: warm sky above, cool earth below
-    const hemi = new THREE.HemisphereLight(0xffeedd, 0x6b8a7a, 0.5);
-    this.scene.add(hemi);
-
-    // Main sun (afternoon glow from above-right)
-    const sun = new THREE.DirectionalLight(0xffeedd, 1.3);
-    sun.position.set(12, 16, 4);
-    sun.castShadow = true;
-    sun.shadow.mapSize.width = 1024;
-    sun.shadow.mapSize.height = 1024;
-    sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 50;
-    sun.shadow.camera.left = -15;
-    sun.shadow.camera.right = 15;
-    sun.shadow.camera.top = 15;
-    sun.shadow.camera.bottom = -15;
-    sun.shadow.bias = -0.0003;
-    this.scene.add(sun);
-
-    // Cool fill light (water reflection blue from opposite side)
-    const fill = new THREE.DirectionalLight(0x88ccdd, 0.3);
-    fill.position.set(-5, 2, -5);
-    this.scene.add(fill);
-
-    // --- Scene Elements ---
-    this._createOcean();
-    this._createAreaIslands();
-    this._createExtraNodes();
-    this._createSteppingStones();
-    this._createClouds();
-    this._createFireflies();
-    this._createCentralTree();
-
-    // --- Raycaster for interaction ---
-    this.raycaster = new THREE.Raycaster();
-    this.mouse = new THREE.Vector2();
+    // Interaction
     this._setupInteraction();
 
-    // --- Resize ---
-    this._onResize = () => {
-      this.camera.aspect =
-        this.container.clientWidth / this.container.clientHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(
-        this.container.clientWidth,
-        this.container.clientHeight
-      );
-    };
+    // Resize
+    this._onResize = () => this._resize();
     window.addEventListener("resize", this._onResize);
+    this._resize();
 
-    // --- Start ---
+    // Spawn initial breathing ripples
+    for (const area of AREAS) {
+      this._breathingRipples.push({
+        cx: area.cx,
+        cy: area.cy,
+        radius: 0,
+        maxRadius: area.size * 2.8,
+        speed: 0.15 + Math.random() * 0.2,
+        opacity: 0.35,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+
+    // Start animation
     this._animate();
   }
 
-  // ── Ocean Water ──────────────────────────────────────────
+  _resize() {
+    const rect = this.container.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio, 2);
+    const w = rect.width;
+    const h = rect.height;
 
-  _createOcean() {
-    const THREE = this.THREE;
-    const size = 24;
-    const segs = 32;
-    const geo = new THREE.PlaneGeometry(size, size, segs, segs);
-    geo.rotateX(-Math.PI / 2);
+    this.canvas.width = w * dpr;
+    this.canvas.height = h * dpr;
 
-    // Cache original Y positions for wave animation
-    const posArr = geo.attributes.position.array;
-    this._waterOrigY = new Float32Array(posArr.length / 3);
-    for (let i = 0; i < this._waterOrigY.length; i++) {
-      this._waterOrigY[i] = posArr[i * 3 + 1];
+    // Calculate scale to fit design space
+    const scaleX = w / DESIGN_W;
+    const scaleY = h / DESIGN_H;
+    this.scale = Math.min(scaleX, scaleY);
+    this.offsetX = (w - DESIGN_W * this.scale) / 2;
+    this.offsetY = (h - DESIGN_H * this.scale) / 2;
+
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // ── Drawing ──────────────────────────────────────────────
+
+  _draw(time) {
+    const ctx = this.ctx;
+    const w = this.canvas.width / (Math.min(window.devicePixelRatio, 2));
+    const h = this.canvas.height / (Math.min(window.devicePixelRatio, 2));
+
+    // Clear
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.translate(this.offsetX, this.offsetY);
+    ctx.scale(this.scale, this.scale);
+
+    // Clip to design area
+    ctx.beginPath();
+    ctx.rect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.clip();
+
+    // 1. Sand background
+    this._drawSand(ctx, time);
+
+    // 2. Raked sand ripples
+    this._drawRipples(ctx, time);
+
+    // 3. Connecting sand paths (subtle lines between stones)
+    this._drawGardenPaths(ctx);
+
+    // 4. Extra node stones (drawn behind main stones)
+    for (const node of EXTRA_NODES) {
+      this._drawStone(ctx, node, time);
+      this._drawLabel(ctx, node, time);
     }
 
-    const mat = new THREE.MeshPhongMaterial({
-      color: 0x5b9aa0,
-      specular: 0x8ec8d0,
-      shininess: 80,
-      transparent: true,
-      opacity: 0.88,
-      side: THREE.DoubleSide,
-    });
-
-    this.water = new THREE.Mesh(geo, mat);
-    this.water.position.y = -1.2;
-    this.water.receiveShadow = true;
-    this.water.name = "water";
-    this.scene.add(this.water);
-
-    // Ocean floor for depth illusion
-    const floorGeo = new THREE.PlaneGeometry(size, size);
-    floorGeo.rotateX(-Math.PI / 2);
-    const floorMat = new THREE.MeshBasicMaterial({ color: 0x1a4a5a });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.position.y = -1.35;
-    floor.name = "ocean-floor";
-    this.scene.add(floor);
-  }
-
-  _animateWater(time) {
-    if (!this.water) return;
-    const pos = this.water.geometry.attributes.position;
-    const arr = pos.array;
-    const count = pos.count;
-
-    for (let i = 0; i < count; i++) {
-      const origY = this._waterOrigY[i];
-      const x = arr[i * 3];
-      const z = arr[i * 3 + 2];
-
-      const wave1 =
-        Math.sin(x * 0.8 + time * 1.2) * Math.cos(z * 0.6 + time * 0.9) * 0.12;
-      const wave2 =
-        Math.sin(x * 0.4 - time * 0.7 + 1.5) *
-        Math.sin(z * 0.5 + time * 1.1) *
-        0.08;
-      const wave3 = Math.cos(x * 1.1 + z * 0.9 + time * 0.5) * 0.05;
-
-      arr[i * 3 + 1] = origY + wave1 + wave2 + wave3;
-    }
-    pos.needsUpdate = true;
-    this.water.geometry.computeVertexNormals();
-  }
-
-  // ── Area Islands (organic terrain) ───────────────────────
-
-  _createAreaIslands() {
-    const THREE = this.THREE;
-    this.areaGroups = [];
-
-    AREAS.forEach((area, idx) => {
-      const group = new THREE.Group();
-      const x = Math.cos(area.angle) * AREA_RING_RADIUS;
-      const z = Math.sin(area.angle) * AREA_RING_RADIUS;
-      group.position.set(x, 0, z);
-
-      // Slight random tilt
-      const tiltX = (Math.sin(idx * 2.7) * 0.04);
-      const tiltZ = (Math.cos(idx * 1.8) * 0.04);
-      group.rotation.x = tiltX;
-      group.rotation.z = tiltZ;
-
-      // --- Island body (CylinderGeometry with displacement) ---
-      const bodyGeo = new THREE.CylinderGeometry(0.7, 1.05, 0.5, 20, 4);
-      displaceIslandVertices(bodyGeo, idx * 37 + 5);
-
-      const bodyMats = [
-        // side (earth)
-        new THREE.MeshStandardMaterial({
-          color: 0x9b7b4a,
-          roughness: 0.75,
-          metalness: 0.05,
-        }),
-        // top (grass)
-        new THREE.MeshStandardMaterial({
-          color: 0x8db255,
-          roughness: 0.65,
-          metalness: 0.02,
-        }),
-        // bottom (dark earth)
-        new THREE.MeshStandardMaterial({
-          color: 0x6b5030,
-          roughness: 0.8,
-        }),
-      ];
-      const body = new THREE.Mesh(bodyGeo, bodyMats);
-      body.position.y = 0.25; // half height
-      body.castShadow = true;
-      body.receiveShadow = true;
-      body.name = `island-${area.id}`;
-      group.add(body);
-
-      // --- Trees ---
-      const treeCount = 2 + (idx % 3); // 2–4 trees
-      for (let t = 0; t < treeCount; t++) {
-        const tAngle = (t / treeCount) * Math.PI * 2 + idx * 0.7;
-        const tRadius = 0.25 + (t % 2) * 0.15;
-        const tree = createTree(
-          THREE,
-          0.28 + (t % 3) * 0.04,
-          0.11 + (t % 2) * 0.04,
-          idx * 100 + t
-        );
-        tree.position.set(
-          Math.cos(tAngle) * tRadius,
-          0.52,
-          Math.sin(tAngle) * tRadius
-        );
-        tree.scale.setScalar(0.8 + Math.random() * 0.4);
-        group.add(tree);
-      }
-
-      // --- Subfolder indicators (small spheres on surface) ---
-      const subCount = area.subfolders.length;
-      area.subfolders.forEach((sub, i) => {
-        const sAngle = (i / Math.max(subCount, 1)) * Math.PI * 2 + 0.3;
-        const sRadius = 0.4;
-        const sphereGeo = new THREE.SphereGeometry(0.06, 8, 6);
-        const sphereMat = new THREE.MeshStandardMaterial({
-          color: area.subColor,
-          roughness: 0.4,
-          emissive: area.subColor,
-          emissiveIntensity: 0.15,
-        });
-        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-        sphere.position.set(
-          Math.cos(sAngle) * sRadius,
-          0.52,
-          Math.sin(sAngle) * sRadius
-        );
-        sphere.castShadow = true;
-        sphere.name = `sub-${area.id}-${sub}`;
-        group.add(sphere);
-      });
-
-      // --- Label Sprite ---
-      const labelCanvas = createLabelSprite(
-        area.name,
-        area.icon,
-        `#${area.color.toString(16).padStart(6, "0")}`
-      );
-      const labelTex = new THREE.CanvasTexture(labelCanvas);
-      labelTex.minFilter = THREE.LinearFilter;
-      const labelMat = new THREE.SpriteMaterial({
-        map: labelTex,
-        transparent: true,
-        depthTest: false,
-      });
-      const label = new THREE.Sprite(labelMat);
-      label.position.y = 0.95;
-      label.scale.set(2.0, 1.0, 1);
-      label.name = `label-${area.id}`;
-      group.add(label);
-
-      // --- Metadata for animation ---
-      group.userData = {
-        areaId: area.id,
-        areaPath: area.path,
-        areaName: area.name,
-        areaIcon: area.icon,
-        baseY: 0,
-        bobPhase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.4 + Math.random() * 0.6,
-        bobAmp: 0.08 + Math.random() * 0.12,
-        rotPhase: Math.random() * Math.PI * 2,
-        rotSpeed: 0.2 + Math.random() * 0.3,
-      };
-
-      this.scene.add(group);
-      this.clickableObjects.push(body);
-      this.areaGroups.push(group);
-    });
-  }
-
-  // ── Extra Nodes (mini floating islands) ──────────────────
-
-  _createExtraNodes() {
-    const THREE = this.THREE;
-    this.extraGroups = [];
-
-    EXTRA_NODES.forEach((node, idx) => {
-      const group = new THREE.Group();
-      const x = Math.cos(node.angle) * node.distance;
-      const z = Math.sin(node.angle) * node.distance;
-      group.position.set(x, 0.35, z);
-
-      // Mini island body
-      const bodyGeo = new THREE.CylinderGeometry(0.22, 0.38, 0.22, 14, 3);
-      displaceIslandVertices(bodyGeo, idx * 53 + 17);
-
-      const bodyMats = [
-        new THREE.MeshStandardMaterial({
-          color: 0x9b7b4a,
-          roughness: 0.75,
-          metalness: 0.05,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color(node.color).multiplyScalar(0.7),
-          roughness: 0.6,
-          metalness: 0.02,
-        }),
-        new THREE.MeshStandardMaterial({
-          color: 0x6b5030,
-          roughness: 0.8,
-        }),
-      ];
-      const body = new THREE.Mesh(bodyGeo, bodyMats);
-      body.position.y = 0.11;
-      body.castShadow = true;
-      body.receiveShadow = true;
-      body.name = `extra-${node.id}`;
-      group.add(body);
-
-      // Small tree/bush
-      const miniTree = createTree(THREE, 0.18, 0.07, idx * 200 + 42);
-      miniTree.position.y = 0.23;
-      miniTree.scale.setScalar(0.65);
-      group.add(miniTree);
-
-      // Label
-      const labelCanvas = createLabelSprite(
-        node.name,
-        node.icon,
-        `#${node.color.toString(16).padStart(6, "0")}`
-      );
-      const labelTex = new THREE.CanvasTexture(labelCanvas);
-      labelTex.minFilter = THREE.LinearFilter;
-      const labelMat = new THREE.SpriteMaterial({
-        map: labelTex,
-        transparent: true,
-        depthTest: false,
-      });
-      const label = new THREE.Sprite(labelMat);
-      label.position.y = 0.55;
-      label.scale.set(1.6, 0.8, 1);
-      group.add(label);
-
-      group.userData = {
-        areaId: node.id,
-        areaPath: node.path,
-        areaName: node.name,
-        areaIcon: node.icon,
-        baseY: 0.35,
-        bobPhase: Math.random() * Math.PI * 2,
-        bobSpeed: 0.3 + Math.random() * 0.5,
-        bobAmp: 0.05 + Math.random() * 0.08,
-        rotPhase: Math.random() * Math.PI * 2,
-        rotSpeed: 0.15 + Math.random() * 0.25,
-      };
-
-      this.scene.add(group);
-      this.clickableObjects.push(body);
-      this.extraGroups.push(group);
-    });
-  }
-
-  // ── Stepping Stones (underwater paths) ───────────────────
-
-  _createSteppingStones() {
-    const THREE = this.THREE;
-
-    // Subtle concentric rings at water level suggesting paths
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: 0xb5c8c0,
-      roughness: 0.7,
-      transparent: true,
-      opacity: 0.18,
-    });
-
-    [2.2, 3.4, 5.6].forEach((radius) => {
-      const ringGeo = new THREE.TorusGeometry(radius, 0.04, 8, 48);
-      ringGeo.rotateX(Math.PI / 2);
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.position.y = -0.85;
-      ring.receiveShadow = true;
-      ring.name = "stepping-stone-ring";
-      this.scene.add(ring);
-    });
-
-    // Small scattered stones between islands
-    const stoneGeo = new THREE.SphereGeometry(0.08, 5, 4);
-    const stonePositions = [
-      [1.8, 1.4], [-1.5, 1.6], [1.3, -1.7], [-1.7, -1.3],
-      [0.4, 3.5], [-0.3, -3.2], [3.2, -0.2], [-3.1, 0.3],
-    ];
-
-    stonePositions.forEach(([sx, sz]) => {
-      const stoneMat = new THREE.MeshStandardMaterial({
-        color: 0xc8d5cc,
-        roughness: 0.65,
-        transparent: true,
-        opacity: 0.25,
-      });
-      const stone = new THREE.Mesh(stoneGeo, stoneMat);
-      stone.position.set(sx, -0.95, sz);
-      stone.scale.set(1, 0.3, 1);
-      stone.receiveShadow = true;
-      stone.name = "stepping-stone";
-      this.scene.add(stone);
-    });
-  }
-
-  // ── Floating Clouds ──────────────────────────────────────
-
-  _createClouds() {
-    const THREE = this.THREE;
-    this.cloudGroups = [];
-
-    const cloudDefs = [
-      { x: 3.5, z: 2.0, y: 3.2, seed: 101 },
-      { x: -3.0, z: 2.5, y: 3.8, seed: 202 },
-      { x: 2.0, z: -3.2, y: 2.8, seed: 303 },
-      { x: -2.8, z: -2.8, y: 3.5, seed: 404 },
-      { x: 5.0, z: -0.5, y: 4.0, seed: 505 },
-      { x: -4.5, z: -1.0, y: 3.0, seed: 606 },
-      { x: 0.5, z: 4.0, y: 3.6, seed: 707 },
-      { x: -0.8, z: -4.2, y: 4.2, seed: 808 },
-    ];
-
-    cloudDefs.forEach((def) => {
-      const cloud = createCloudGroup(THREE, def.seed);
-      cloud.position.set(def.x, def.y, def.z);
-      cloud.userData = {
-        baseX: def.x,
-        baseZ: def.z,
-        baseY: def.y,
-        driftAngle: Math.random() * Math.PI * 2,
-        driftSpeed: 0.08 + Math.random() * 0.15,
-        driftRadius: 0.6 + Math.random() * 1.5,
-        swayPhase: Math.random() * Math.PI * 2,
-        swaySpeed: 0.3 + Math.random() * 0.4,
-      };
-      cloud.name = "cloud";
-      this.scene.add(cloud);
-      this.cloudGroups.push(cloud);
-    });
-  }
-
-  _animateClouds(time) {
-    this.cloudGroups.forEach((cloud) => {
-      const ud = cloud.userData;
-      cloud.position.x =
-        ud.baseX + Math.cos(time * ud.driftSpeed + ud.swayPhase) * ud.driftRadius;
-      cloud.position.z =
-        ud.baseZ + Math.sin(time * ud.driftSpeed * 0.8 + ud.swayPhase) * ud.driftRadius * 0.8;
-      cloud.position.y =
-        ud.baseY + Math.sin(time * ud.swaySpeed + ud.swayPhase) * 0.3;
-    });
-  }
-
-  // ── Firefly Particles ────────────────────────────────────
-
-  _createFireflies() {
-    const THREE = this.THREE;
-    const count = 150;
-    const positions = new Float32Array(count * 3);
-
-    this._fireflyParams = [];
-    for (let i = 0; i < count; i++) {
-      const bx = (Math.random() - 0.5) * 12;
-      const bz = (Math.random() - 0.5) * 12;
-      const by = 0.3 + Math.random() * 4.5;
-      positions[i * 3] = bx;
-      positions[i * 3 + 1] = by;
-      positions[i * 3 + 2] = bz;
-
-      this._fireflyParams.push({
-        baseX: bx,
-        baseZ: bz,
-        baseY: by,
-        ax: 0.4 + Math.random() * 1.8,
-        az: 0.4 + Math.random() * 1.8,
-        ay: 0.15 + Math.random() * 0.4,
-        px: Math.random() * Math.PI * 2,
-        pz: Math.random() * Math.PI * 2,
-        py: Math.random() * Math.PI * 2,
-        speed: 0.25 + Math.random() * 0.7,
-        twinkle: Math.random() * Math.PI * 2,
-        twinkleSpeed: 1.5 + Math.random() * 3,
-      });
+    // 5. Main area stones
+    for (const area of AREAS) {
+      this._drawStone(ctx, area, time);
+      this._drawMoss(ctx, area, time);
+      this._drawLabel(ctx, area, time);
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    // 6. Garden enclosure frame
+    this._drawFrame(ctx, time);
 
-    // Radial glow sprite
-    const canvas = document.createElement("canvas");
-    canvas.width = 32;
-    canvas.height = 32;
-    const ctx = canvas.getContext("2d");
-    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradient.addColorStop(0, "rgba(255, 230, 120, 0.95)");
-    gradient.addColorStop(0.15, "rgba(255, 210, 60, 0.75)");
-    gradient.addColorStop(0.4, "rgba(255, 180, 30, 0.25)");
-    gradient.addColorStop(0.7, "rgba(255, 150, 20, 0.05)");
-    gradient.addColorStop(1, "rgba(255, 120, 0, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 32, 32);
+    // 7. Floating sand particles
+    this._drawParticles(ctx, time);
 
-    const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.PointsMaterial({
-      map: tex,
-      color: 0xffd700,
-      size: 0.4,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 0.7,
-    });
-
-    this.fireflies = new THREE.Points(geo, mat);
-    this.fireflies.name = "fireflies";
-    this.scene.add(this.fireflies);
+    ctx.restore();
   }
 
-  _animateFireflies(time) {
-    if (!this.fireflies) return;
-    const pos = this.fireflies.geometry.attributes.position.array;
+  // ── Sand Background ──────────────────────────────────────
 
-    for (let i = 0; i < this._fireflyParams.length; i++) {
-      const p = this._fireflyParams[i];
-      pos[i * 3] = p.baseX + Math.sin(time * p.speed + p.px) * p.ax;
-      pos[i * 3 + 1] = p.baseY + Math.sin(time * p.speed * 1.3 + p.py) * p.ay;
-      pos[i * 3 + 2] = p.baseZ + Math.cos(time * p.speed * 0.9 + p.pz) * p.az;
-    }
-    this.fireflies.geometry.attributes.position.needsUpdate = true;
+  _drawSand(ctx, _time) {
+    // Base sand
+    const sandGrad = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
+    sandGrad.addColorStop(0, "#f7f3ec");
+    sandGrad.addColorStop(0.5, "#f5f0e8");
+    sandGrad.addColorStop(1, "#f0eae0");
+    ctx.fillStyle = sandGrad;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
 
-    // Vary overall opacity for subtle twinkling
-    const twinkle = 0.55 + Math.sin(time * 0.8) * 0.15;
-    this.fireflies.material.opacity = twinkle;
-  }
-
-  // ── Central Great Tree ───────────────────────────────────
-
-  _createCentralTree() {
-    const THREE = this.THREE;
-    const group = new THREE.Group();
-    group.position.set(0, 0.3, 0);
-
-    // Trunk
-    const trunkGeo = new THREE.CylinderGeometry(0.06, 0.16, 1.2, 10);
-    const trunkMat = new THREE.MeshStandardMaterial({
-      color: 0x7a5c3a,
-      roughness: 0.6,
-    });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.y = 0.6;
-    trunk.castShadow = true;
-    trunk.receiveShadow = true;
-    group.add(trunk);
-
-    // Root tendrils spreading outward
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2;
-      const rootGeo = new THREE.CylinderGeometry(0.02, 0.05, 0.5, 6);
-      const root = new THREE.Mesh(rootGeo, trunkMat);
-      root.position.set(
-        Math.cos(angle) * 0.22,
-        0.15,
-        Math.sin(angle) * 0.22
-      );
-      root.rotation.z = Math.cos(angle) * 0.8;
-      root.rotation.x = Math.sin(angle) * 0.8;
-      root.castShadow = true;
-      group.add(root);
+    // Subtle grain texture (sparse dots)
+    ctx.fillStyle = "rgba(180,170,155,0.12)";
+    const grainSeed = 42;
+    const grainRand = mulberry32(grainSeed);
+    for (let i = 0; i < 400; i++) {
+      const gx = grainRand() * DESIGN_W;
+      const gy = grainRand() * DESIGN_H;
+      ctx.beginPath();
+      ctx.arc(gx, gy, 0.6 + grainRand() * 1.2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Foliage layers (canopy)
-    const foliageDefs = [
-      { r: 0.55, h: 0.45, y: 1.0 },
-      { r: 0.42, h: 0.4, y: 1.3 },
-      { r: 0.3, h: 0.35, y: 1.55 },
-      { r: 0.18, h: 0.3, y: 1.75 },
-    ];
-
-    foliageDefs.forEach((def, i) => {
-      const coneGeo = new THREE.ConeGeometry(def.r, def.h, 10, 2);
-      const hue = 0.2 + i * 0.03;
-      const color = new THREE.Color().setHSL(hue, 0.55, 0.3 + i * 0.06);
-      const coneMat = new THREE.MeshStandardMaterial({
-        color: color,
-        roughness: 0.5,
-      });
-      const cone = new THREE.Mesh(coneGeo, coneMat);
-      cone.position.y = def.y;
-      cone.castShadow = true;
-      cone.receiveShadow = true;
-      group.add(cone);
-    });
-
-    // Orbiting glow particles around canopy
-    const orbitCount = 25;
-    const orbitPositions = new Float32Array(orbitCount * 3);
-    this._treeOrbitData = [];
-    for (let i = 0; i < orbitCount; i++) {
-      const angle = (i / orbitCount) * Math.PI * 2;
-      const radius = 0.5 + Math.random() * 0.25;
-      const height = 0.9 + Math.random() * 0.9;
-      orbitPositions[i * 3] = Math.cos(angle) * radius;
-      orbitPositions[i * 3 + 1] = height;
-      orbitPositions[i * 3 + 2] = Math.sin(angle) * radius;
-      this._treeOrbitData.push({
-        angle: angle,
-        radius: radius,
-        height: height,
-        speed: 0.3 + Math.random() * 0.6,
-        yOsc: Math.random() * Math.PI * 2,
-      });
-    }
-
-    const orbitGeo = new THREE.BufferGeometry();
-    orbitGeo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(orbitPositions, 3)
+    // Subtle vignette edges
+    const vignette = ctx.createRadialGradient(
+      DESIGN_W / 2, DESIGN_H / 2, DESIGN_W * 0.35,
+      DESIGN_W / 2, DESIGN_H / 2, DESIGN_W * 0.75
     );
-
-    // Mini glow sprite for orbiting particles
-    const dotCanvas = document.createElement("canvas");
-    dotCanvas.width = 16;
-    dotCanvas.height = 16;
-    const dctx = dotCanvas.getContext("2d");
-    const dgrad = dctx.createRadialGradient(8, 8, 0, 8, 8, 8);
-    dgrad.addColorStop(0, "rgba(255, 240, 180, 0.9)");
-    dgrad.addColorStop(0.5, "rgba(255, 200, 80, 0.3)");
-    dgrad.addColorStop(1, "rgba(255, 150, 30, 0)");
-    dctx.fillStyle = dgrad;
-    dctx.fillRect(0, 0, 16, 16);
-
-    const orbitTex = new THREE.CanvasTexture(dotCanvas);
-    const orbitMat = new THREE.PointsMaterial({
-      map: orbitTex,
-      color: 0xffe8a0,
-      size: 0.15,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 0.65,
-    });
-
-    this.treeOrbitParticles = new THREE.Points(orbitGeo, orbitMat);
-    group.add(this.treeOrbitParticles);
-
-    group.name = "central-tree";
-    this.centralTreeGroup = group;
-    this.scene.add(group);
+    vignette.addColorStop(0, "rgba(0,0,0,0)");
+    vignette.addColorStop(1, "rgba(120,100,70,0.08)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
   }
 
-  _animateCentralTree(time) {
-    if (!this.centralTreeGroup) return;
+  // ── Raked Sand Ripples ──────────────────────────────────
 
-    // Gentle sway
-    this.centralTreeGroup.rotation.z =
-      Math.sin(time * 0.35) * 0.015;
-    this.centralTreeGroup.rotation.x =
-      Math.cos(time * 0.42) * 0.01;
+  _drawRipples(ctx, time) {
+    // Concentric ripples around each area stone
+    const allStones = [...AREAS, ...EXTRA_NODES];
 
-    // Orbit particles
-    if (this.treeOrbitParticles && this._treeOrbitData) {
-      const pos = this.treeOrbitParticles.geometry.attributes.position.array;
-      for (let i = 0; i < this._treeOrbitData.length; i++) {
-        const d = this._treeOrbitData[i];
-        const a = d.angle + time * d.speed;
-        pos[i * 3] = Math.cos(a) * d.radius;
-        pos[i * 3 + 1] = d.height + Math.sin(time * 1.2 + d.yOsc) * 0.12;
-        pos[i * 3 + 2] = Math.sin(a) * d.radius;
+    for (const stone of allStones) {
+      const cx = stone.cx;
+      const cy = stone.cy;
+      const maxR = stone.size * 3.5;
+
+      // Draw multiple concentric rings with decreasing opacity
+      const ringCount = 12;
+      for (let i = 1; i <= ringCount; i++) {
+        const baseR = stone.size * 0.8 + (i / ringCount) * (maxR - stone.size * 0.8);
+        // Subtle breathing animation
+        const breathe = Math.sin(time * 0.0004 + i * 0.5 + stone.cx * 0.01) * 1.5;
+        const r = baseR + breathe;
+        const alpha = 0.22 * (1 - i / ringCount) * (1 - i / ringCount);
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(180,168,148,${alpha.toFixed(3)})`;
+        ctx.lineWidth = 0.7 + (i % 3 === 0 ? 0.4 : 0);
+        ctx.stroke();
       }
-      this.treeOrbitParticles.geometry.attributes.position.needsUpdate = true;
+
+      // Animated expanding ripple (breathing out)
+      for (const ripple of this._breathingRipples) {
+        if (Math.abs(ripple.cx - cx) < 2 && Math.abs(ripple.cy - cy) < 2) {
+          ripple.radius += ripple.speed * 0.06;
+          if (ripple.radius > ripple.maxRadius) {
+            ripple.radius = 0;
+          }
+          const progress = ripple.radius / ripple.maxRadius;
+          const alpha = ripple.opacity * (1 - progress) * (1 - progress);
+          ctx.beginPath();
+          ctx.arc(cx, cy, ripple.radius, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(160,145,125,${alpha.toFixed(3)})`;
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Garden-wide raking lines (horizontal-ish, slight wave)
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.strokeStyle = "#b0a590";
+    ctx.lineWidth = 0.5;
+    const lineSpacing = 8;
+    for (let y = lineSpacing; y < DESIGN_H; y += lineSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x < DESIGN_W; x += 20) {
+        // Gentle wave around stones
+        const wave = Math.sin(x * 0.008 + time * 0.0001 + y * 0.02) * 2.5;
+        ctx.lineTo(x, y + wave);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ── Sand Garden Paths ────────────────────────────────────
+
+  _drawGardenPaths(ctx) {
+    // Subtle raked paths connecting central area to each main stone
+    const centerX = DESIGN_W / 2;
+    const centerY = DESIGN_H / 2;
+
+    ctx.save();
+    ctx.globalAlpha = 0.07;
+    ctx.strokeStyle = "#c4b8a5";
+    ctx.lineWidth = 14;
+
+    for (const area of AREAS) {
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      // Slightly curved path
+      const midX = (centerX + area.cx) / 2 + (area.cy - centerY) * 0.15;
+      const midY = (centerY + area.cy) / 2 + (centerX - area.cx) * 0.1;
+      ctx.quadraticCurveTo(midX, midY, area.cx, area.cy);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Center empty circle (ma / negative space)
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 28, 0, Math.PI * 2);
+    ctx.fillStyle = "#f2ece2";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(170,158,138,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // ── Stone Drawing ────────────────────────────────────────
+
+  _drawStone(ctx, stone, _time) {
+    const shapes = this._stoneShapes[stone.id];
+    if (!shapes) return;
+
+    const cx = stone.cx;
+    const cy = stone.cy;
+
+    // Stone shadow (offset slightly)
+    ctx.save();
+    ctx.translate(cx + 3, cy + 3);
+    ctx.beginPath();
+    ctx.moveTo(shapes[0].x, shapes[0].y);
+    for (let i = 1; i < shapes.length; i++) {
+      ctx.lineTo(shapes[i].x, shapes[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "rgba(140,125,105,0.25)";
+    ctx.fill();
+    ctx.restore();
+
+    // Stone body with gradient
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.beginPath();
+    ctx.moveTo(shapes[0].x, shapes[0].y);
+    for (let i = 1; i < shapes.length; i++) {
+      ctx.lineTo(shapes[i].x, shapes[i].y);
+    }
+    ctx.closePath();
+
+    // Stone gradient (lit from top-left)
+    const grad = ctx.createLinearGradient(
+      -stone.size, -stone.size,
+      stone.size, stone.size
+    );
+    grad.addColorStop(0, this._lightenColor(stone.color, 20));
+    grad.addColorStop(0.5, stone.color);
+    grad.addColorStop(1, this._darkenColor(stone.color, 25));
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Stone edge (ink outline)
+    ctx.strokeStyle = "rgba(70,55,40,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Highlight on top-left edge
+    ctx.beginPath();
+    ctx.moveTo(shapes[0].x, shapes[0].y);
+    for (let i = 1; i < Math.floor(shapes.length * 0.35); i++) {
+      ctx.lineTo(shapes[i].x, shapes[i].y);
+    }
+    ctx.strokeStyle = "rgba(255,250,240,0.3)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Store hit-test center and radius
+    stone._hitR = stone.size * 0.85;
+  }
+
+  // ── Moss Patches (subfolders) ────────────────────────────
+
+  _drawMoss(ctx, area, time) {
+    const mossShapes = this._stoneShapes[area.id + "_moss"];
+    if (!mossShapes || mossShapes.length === 0) return;
+
+    const subfolders = area.subfolders;
+
+    for (let i = 0; i < mossShapes.length; i++) {
+      const shape = mossShapes[i];
+      // Position moss near the stone
+      const angle = (i / mossShapes.length) * Math.PI * 2 + 0.4;
+      const dist = area.size * 0.85;
+      const mx = area.cx + Math.cos(angle) * dist;
+      const my = area.cy + Math.sin(angle) * dist;
+
+      ctx.save();
+      ctx.translate(mx, my);
+
+      // Moss body
+      ctx.beginPath();
+      ctx.moveTo(shape[0].x, shape[0].y);
+      for (let j = 1; j < shape.length; j++) {
+        ctx.lineTo(shape[j].x, shape[j].y);
+      }
+      ctx.closePath();
+
+      const mossGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, area.size * 0.2);
+      mossGrad.addColorStop(0, area.mossColor);
+      mossGrad.addColorStop(1, this._darkenColor(area.mossColor, 20));
+      ctx.fillStyle = mossGrad;
+      ctx.fill();
+
+      // Soft edge
+      ctx.strokeStyle = "rgba(60,80,40,0.2)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+
+      // Subtle moss texture dots
+      ctx.fillStyle = "rgba(100,140,80,0.25)";
+      const dotRand = mulberry32(i * 37 + area.cx);
+      for (let d = 0; d < 4; d++) {
+        const dx = (dotRand() - 0.5) * area.size * 0.2;
+        const dy = (dotRand() - 0.5) * area.size * 0.2;
+        ctx.beginPath();
+        ctx.arc(dx, dy, 1.5 + dotRand() * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Store subfolder name for hit testing
+      if (subfolders[i]) {
+        ctx.restore();
+        ctx.save();
+        ctx.translate(mx, my);
+        // Store hit area data on a hidden property
+        this._subHitAreas = this._subHitAreas || [];
+        this._subHitAreas.push({
+          cx: mx, cy: my, r: area.size * 0.16,
+          areaId: area.id,
+          subName: subfolders[i],
+        });
+        ctx.restore();
+        ctx.save();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // ── Calligraphy Labels ───────────────────────────────────
+
+  _drawLabel(ctx, stone, _time) {
+    const cx = stone.cx;
+    const cy = stone.cy + stone.size * 0.7 + 18;
+
+    // Name
+    ctx.font = "bold 15px Georgia, 'Noto Serif SC', 'KaiTi', serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+
+    // Ink-wash shadow
+    ctx.fillStyle = "rgba(200,185,165,0.4)";
+    ctx.fillText(stone.name, cx + 0.5, cy + 0.5);
+
+    // Main text
+    ctx.fillStyle = "#4a3728";
+    ctx.fillText(stone.name, cx, cy);
+
+    // Icon above name
+    ctx.font = "18px serif";
+    ctx.fillText(stone.icon, cx, cy - 24);
+
+    // Subtle red seal / hanko dot for extra nodes
+    if (stone.size < 32) {
+      ctx.beginPath();
+      ctx.arc(cx + stone.size * 0.55, cy - 8, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(180,80,60,0.5)";
+      ctx.fill();
+    }
+
+    // Store label position for hit testing
+    stone._labelY = cy;
+  }
+
+  // ── Garden Frame ─────────────────────────────────────────
+
+  _drawFrame(ctx, _time) {
+    const margin = 12;
+    const alpha = 0.18;
+
+    // Outer border (thin, like a tatami edge)
+    ctx.strokeStyle = `rgba(139,115,85,${alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(margin, margin, DESIGN_W - margin * 2, DESIGN_H - margin * 2);
+
+    // Inner border
+    ctx.strokeStyle = `rgba(180,160,135,${alpha * 0.7})`;
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(margin + 8, margin + 8, DESIGN_W - (margin + 8) * 2, DESIGN_H - (margin + 8) * 2);
+
+    // Corner accents (simple L-shapes)
+    const cornerLen = 24;
+    const cm = margin + 4;
+    ctx.strokeStyle = `rgba(139,115,85,${(alpha * 0.6).toFixed(3)})`;
+    ctx.lineWidth = 1;
+    [
+      [cm, cm], // top-left
+      [DESIGN_W - cm, cm], // top-right
+      [cm, DESIGN_H - cm], // bottom-left
+      [DESIGN_W - cm, DESIGN_H - cm], // bottom-right
+    ].forEach(([cx, cy]) => {
+      const dx = cx < DESIGN_W / 2 ? 1 : -1;
+      const dy = cy < DESIGN_H / 2 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + cornerLen * dy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + cornerLen * dx, cy);
+      ctx.stroke();
+    });
+  }
+
+  // ── Floating Sand Particles ──────────────────────────────
+
+  _drawParticles(ctx, time) {
+    if (!this._particles) {
+      this._particles = [];
+      const pRand = mulberry32(777);
+      for (let i = 0; i < 60; i++) {
+        this._particles.push({
+          x: pRand() * DESIGN_W,
+          y: pRand() * DESIGN_H,
+          r: 0.6 + pRand() * 1.4,
+          speed: 0.08 + pRand() * 0.25,
+          phase: pRand() * Math.PI * 2,
+          amp: 0.3 + pRand() * 1.2,
+        });
+      }
+    }
+
+    ctx.fillStyle = "rgba(190,175,150,0.25)";
+    for (const p of this._particles) {
+      const py = p.y + Math.sin(time * 0.0005 + p.phase) * p.amp;
+      const px = p.x + Math.cos(time * 0.0004 + p.phase) * p.amp * 0.6;
+      ctx.beginPath();
+      ctx.arc(px, py, p.r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
   // ── Interaction ──────────────────────────────────────────
 
   _setupInteraction() {
-    const canvas = this.renderer.domElement;
-
-    canvas.addEventListener("mousemove", (e) => {
-      const rect = canvas.getBoundingClientRect();
-      this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    this.canvas.addEventListener("mousemove", (e) => {
+      const pos = this._eventToDesign(e);
+      const hit = this._hitTest(pos.x, pos.y);
+      if (hit !== this.hoveredStone) {
+        this.hoveredStone = hit;
+        this.canvas.style.cursor = hit ? "pointer" : "default";
+        // Redraw for hover effect
+        this._draw(this._lastTime || Date.now());
+      }
     });
 
-    canvas.addEventListener("click", (e) => {
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-      const intersects = this.raycaster.intersectObjects(
-        this.clickableObjects
-      );
-      if (intersects.length > 0) {
-        const obj = intersects[0].object;
-        this._navigateTo(obj);
+    this.canvas.addEventListener("click", (e) => {
+      const pos = this._eventToDesign(e);
+      const hit = this._hitTest(pos.x, pos.y);
+      if (hit) {
+        this._navigateTo(hit);
       }
     });
 
     // Touch support
-    canvas.addEventListener("touchend", (e) => {
+    this.canvas.addEventListener("touchend", (e) => {
       if (e.changedTouches.length === 1) {
         const touch = e.changedTouches[0];
-        const rect = canvas.getBoundingClientRect();
-        const mx = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-        const my = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
-        const mouseVec = new this.THREE.Vector2(mx, my);
-        this.raycaster.setFromCamera(mouseVec, this.camera);
-        const intersects = this.raycaster.intersectObjects(
-          this.clickableObjects
-        );
-        if (intersects.length > 0) {
-          this._navigateTo(intersects[0].object);
+        const pos = this._eventToDesign(touch);
+        const hit = this._hitTest(pos.x, pos.y);
+        if (hit) {
+          this._navigateTo(hit);
         }
       }
     });
   }
 
-  _navigateTo(obj) {
-    let areaPath = null;
+  _eventToDesign(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left - this.offsetX) / this.scale,
+      y: (e.clientY - rect.top - this.offsetY) / this.scale,
+    };
+  }
 
-    // Check area island clicks
-    for (const group of this.areaGroups) {
-      if (
-        obj.name === `island-${group.userData.areaId}` ||
-        (obj.name && obj.name.startsWith(`sub-${group.userData.areaId}`))
-      ) {
-        areaPath = group.userData.areaPath;
-        break;
+  _hitTest(x, y) {
+    // Check main area stones
+    for (const area of AREAS) {
+      const dx = x - area.cx;
+      const dy = y - area.cy;
+      if (Math.sqrt(dx * dx + dy * dy) < area.size * 0.9) {
+        return { type: "area", path: area.path };
       }
     }
 
-    // Check extra node clicks
-    if (!areaPath) {
-      for (const group of this.extraGroups) {
-        if (obj.name === `extra-${group.userData.areaId}`) {
-          areaPath = group.userData.areaPath;
-          break;
+    // Check extra nodes
+    for (const node of EXTRA_NODES) {
+      const dx = x - node.cx;
+      const dy = y - node.cy;
+      if (Math.sqrt(dx * dx + dy * dy) < node.size * 0.9) {
+        return { type: "area", path: node.path };
+      }
+    }
+
+    // Check subfolder moss patches
+    if (this._subHitAreas) {
+      for (const sub of this._subHitAreas) {
+        const dx = x - sub.cx;
+        const dy = y - sub.cy;
+        if (Math.sqrt(dx * dx + dy * dy) < sub.r) {
+          const area = AREAS.find((a) => a.id === sub.areaId);
+          if (area) {
+            return {
+              type: "sub",
+              path: area.path + "/" + sub.subName,
+            };
+          }
         }
       }
     }
 
-    if (areaPath && this.app) {
-      const fileExplorer =
-        this.app.internalPlugins?.getPluginById("file-explorer");
-      if (fileExplorer?.enabled) {
-        const abstractFile = this.app.vault.getAbstractFileByPath(areaPath);
-        if (abstractFile) {
-          const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-          if (leaves.length > 0) {
-            // @ts-ignore
-            const explorerView = leaves[0].view;
-            if (explorerView?.revealInFolder) {
-              explorerView.revealInFolder(abstractFile);
-            }
-          }
+    return null;
+  }
+
+  _navigateTo(hit) {
+    if (!hit.path || !this.app) return;
+
+    const abstractFile = this.app.vault.getAbstractFileByPath(hit.path);
+    if (!abstractFile) return;
+
+    const fileExplorer =
+      this.app.internalPlugins?.getPluginById("file-explorer");
+    if (fileExplorer?.enabled) {
+      const leaves = this.app.workspace.getLeavesOfType("file-explorer");
+      if (leaves.length > 0) {
+        // @ts-ignore
+        const explorerView = leaves[0].view;
+        if (explorerView?.revealInFolder) {
+          explorerView.revealInFolder(abstractFile);
         }
       }
     }
@@ -1271,94 +771,41 @@ class LifeMapScene {
 
   _animate() {
     this.animationId = requestAnimationFrame(() => this._animate());
-
-    const delta = this.clock.getDelta();
-    const time = Date.now() * 0.001;
-
-    // Update controls
-    this.controls.update(Math.min(delta, 0.1));
-
-    // Animate water waves
-    this._animateWater(time);
-
-    // Bob + gentle rotation for area islands
-    this.areaGroups.forEach((group) => {
-      const ud = group.userData;
-      group.position.y =
-        ud.baseY + Math.sin(time * ud.bobSpeed + ud.bobPhase) * ud.bobAmp;
-      group.rotation.y +=
-        Math.sin(time * ud.rotSpeed + ud.rotPhase) * 0.0003;
-    });
-
-    // Bob + rotation for extra nodes
-    this.extraGroups.forEach((group) => {
-      const ud = group.userData;
-      group.position.y =
-        ud.baseY + Math.sin(time * ud.bobSpeed + ud.bobPhase) * ud.bobAmp;
-      group.rotation.y +=
-        Math.sin(time * ud.rotSpeed + ud.rotPhase) * 0.0002;
-    });
-
-    // Animate clouds
-    this._animateClouds(time);
-
-    // Animate fireflies
-    this._animateFireflies(time);
-
-    // Animate central tree
-    this._animateCentralTree(time);
-
-    // Hover detection
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.clickableObjects);
-    if (intersects.length > 0) {
-      const obj = intersects[0].object;
-      if (this.hoveredObject !== obj) {
-        this._unhover();
-        this.hoveredObject = obj;
-        if (obj.material.emissive) {
-          obj.material._origEmissive = obj.material.emissive.getHex();
-        }
-        document.body.style.cursor = "pointer";
-      }
-    } else {
-      this._unhover();
-      document.body.style.cursor = "";
-    }
-
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  _unhover() {
-    if (this.hoveredObject && this.hoveredObject.material) {
-      this.hoveredObject = null;
-    }
+    const time = Date.now();
+    this._lastTime = time;
+    this._draw(time);
   }
 
   // ── Cleanup ──────────────────────────────────────────────
 
   dispose() {
     if (this.animationId) cancelAnimationFrame(this.animationId);
-    this.controls?.dispose();
     window.removeEventListener("resize", this._onResize);
-    this.scene?.traverse((obj) => {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (Array.isArray(obj.material)) {
-          obj.material.forEach((m) => {
-            if (m.map) m.map.dispose();
-            m.dispose();
-          });
-        } else {
-          if (obj.material.map) obj.material.map.dispose();
-          obj.material.dispose();
-        }
-      }
-    });
-    this.renderer?.dispose();
-    if (this.renderer?.domElement) {
-      this.renderer.domElement.remove();
+    if (this.canvas) {
+      this.canvas.remove();
     }
+    this._breathingRipples = [];
+    this._subHitAreas = [];
+    this._particles = null;
+    this._stoneShapes = {};
+  }
+
+  // ── Color Helpers ────────────────────────────────────────
+
+  _lightenColor(hex, percent) {
+    const num = parseInt(hex.replace("#", ""), 16);
+    const r = Math.min(255, (num >> 16) + percent);
+    const g = Math.min(255, ((num >> 8) & 0x00ff) + percent);
+    const b = Math.min(255, (num & 0x0000ff) + percent);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  _darkenColor(hex, percent) {
+    const num = parseInt(hex.replace("#", ""), 16);
+    const r = Math.max(0, (num >> 16) - percent);
+    const g = Math.max(0, ((num >> 8) & 0x00ff) - percent);
+    const b = Math.max(0, (num & 0x0000ff) - percent);
+    return `rgb(${r},${g},${b})`;
   }
 }
 
@@ -1381,7 +828,7 @@ class AtlasHomepageView extends ItemView {
   }
 
   getDisplayText() {
-    return "Atlas · 人生地图";
+    return "Atlas · 枯山水";
   }
 
   getIcon() {
@@ -1389,21 +836,20 @@ class AtlasHomepageView extends ItemView {
   }
 
   async onOpen() {
-    const container = this.leaf.view.containerEl.children[1] ||
-                      this.leaf.view.containerEl;
+    const container =
+      this.leaf.view.containerEl.children[1] ||
+      this.leaf.view.containerEl;
     container.empty();
     container.addClass("atlas-homepage-container");
 
     // Loading overlay
     const loadingEl = container.createDiv("atlas-homepage-loading");
-    loadingEl.createDiv("loading-sketch");
-    loadingEl.createDiv("loading-text").setText("绘制你的人生地图...");
+    loadingEl.createDiv("loading-zen-circle");
+    loadingEl.createDiv("loading-text").setText("枯山水を描いている...");
 
     try {
-      const THREE = await ensureThreeJS();
-
-      // Create the 3D scene
-      this.scene = new LifeMapScene(container, THREE, this.plugin.app);
+      // Create the zen garden scene (no Three.js needed!)
+      this.scene = new ZenGardenScene(container, this.plugin.app);
 
       // Fade out loading
       loadingEl.addClass("hidden");
@@ -1411,13 +857,13 @@ class AtlasHomepageView extends ItemView {
 
       // Info overlay
       const infoEl = container.createDiv("atlas-homepage-info");
-      infoEl.setText("拖拽旋转 · 滚轮缩放 · 点击浮岛探索你的知识海洋");
+      infoEl.setText("点击庭石 · 探索你的知识园林");
 
       // Stats bar
       this._createStatsBar(container);
     } catch (err) {
       loadingEl.querySelector(".loading-text")?.setText(
-        "加载失败，请检查网络连接后重试"
+        "加载失败，请重试"
       );
       console.error("[Atlas Homepage] Failed to load:", err);
     }
@@ -1429,20 +875,22 @@ class AtlasHomepageView extends ItemView {
     try {
       const counts = {};
       for (const area of AREAS) {
-        const files = this.plugin.app.vault.getFiles().filter(
-          (f) => f.path.startsWith(area.path) && f.extension === "md"
-        );
+        const files = this.plugin.app.vault
+          .getFiles()
+          .filter(
+            (f) => f.path.startsWith(area.path) && f.extension === "md"
+          );
         counts[area.id] = files.length;
       }
 
       const total = Object.values(counts).reduce((a, b) => a + b, 0);
       const statItems = [
-        { label: "笔记", value: total.toString(), color: "#5a8590" },
-        { label: "领域", value: AREAS.length.toString(), color: "#8ec8d0" },
+        { label: "笔记", value: total.toString(), color: "#8b7355" },
+        { label: "庭石", value: AREAS.length.toString(), color: "#a09080" },
         ...AREAS.map((a) => ({
           label: a.ename,
           value: (counts[a.id] || 0).toString(),
-          color: `#${a.color.toString(16).padStart(6, "0")}`,
+          color: a.color,
         })),
       ];
 
@@ -1471,21 +919,15 @@ class AtlasHomepageView extends ItemView {
 
 class AtlasHomepagePlugin extends Plugin {
   async onload() {
-    // Register custom view
-    this.registerView(
-      VIEW_TYPE,
-      (leaf) => new AtlasHomepageView(leaf, this)
-    );
+    this.registerView(VIEW_TYPE, (leaf) => new AtlasHomepageView(leaf, this));
 
-    // Add ribbon icon
-    this.addRibbonIcon("globe", "打开 Atlas 人生地图", () => {
+    this.addRibbonIcon("globe", "打开 Atlas 枯山水", () => {
       this.activateView();
     });
 
-    // Add command
     this.addCommand({
       id: "open-atlas-homepage",
-      name: "打开 Atlas 人生地图",
+      name: "打开 Atlas 枯山水",
       callback: () => this.activateView(),
     });
   }

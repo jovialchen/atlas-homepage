@@ -3,7 +3,7 @@
   "name": "Atlas Homepage",
   "version": "1.0.0",
   "minAppVersion": "1.5.0",
-  "description": "A Ghibli-inspired floating island ocean homepage for the Atlas vault. Powered by Three.js with animated water, organic terrain, drifting clouds, and glowing fireflies.",
+  "description": "A karesansui (dry landscape) zen garden homepage for the Atlas vault. Pure Canvas 2D — stones, raked sand ripples, moss, and subtle ink-wash animation. Zero dependencies.",
   "author": "Joyce",
   "authorUrl": "",
   "isDesktopOnly": true
